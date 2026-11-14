@@ -1,0 +1,96 @@
+.animated-world {
+  position: relative;
+  isolation: isolate;
+  width: auto;
+  height: 100%;
+  max-width: min(90%, 340px);
+  max-height: 100%;
+  aspect-ratio: 1;
+  margin-inline: auto;
+  flex-shrink: 1;
+  -webkit-tap-highlight-color: transparent;
+}
+.animated-world *, .animated-world *::before, .animated-world *::after { box-sizing: border-box; }
+.aw-warmth {
+  position: absolute;
+  inset: 10% 4% 7%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, #efb35a18, #efb35a08 46%, transparent 70%);
+  animation: aw-breathe 6s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+.aw-toy {
+  position: absolute;
+  display: block;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 28%;
+  background: none;
+  box-shadow: none;
+  color: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  outline-offset: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.aw-toy:focus-visible { outline: 2px dashed #ffe1a0; }
+.aw-toy img { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; pointer-events: none; }
+.aw-toy-response { display: block; width: 100%; height: 100%; transform-origin: 50% 65%; }
+.aw-heart { left: 10%; top: 0; width: 82%; height: 82%; z-index: 3; }
+.aw-heart-float { display: block; height: 100%; animation: aw-heart-float 5.6s ease-in-out infinite; }
+.aw-heart-pop { animation: aw-heart-pop .7s cubic-bezier(.2,.8,.2,1) both; }
+.aw-gingerbread { left: 0; bottom: -1%; width: 30%; height: 39%; z-index: 7; }
+.aw-gingerbread-sway { display: block; height: 100%; transform-origin: 50% 90%; animation: aw-gingerbread-sway 3.4s ease-in-out infinite; }
+.aw-gingerbread-jump { transform-origin: 50% 90%; animation: aw-gingerbread-jump .8s cubic-bezier(.2,.75,.2,1) both; }
+.aw-gift { right: -1%; bottom: 0; width: 31%; height: 34%; z-index: 7; }
+.aw-gift-rock { display: block; height: 100%; transform-origin: 50% 90%; animation: aw-gift-rock 5.2s ease-in-out infinite; }
+.aw-gift-pop { transform-origin: 50% 90%; animation: aw-gift-pop .55s cubic-bezier(.2,.8,.2,1) both; }
+.aw-floor { position: absolute; bottom: 1%; left: 2%; width: 96%; height: 6%; border-radius: 50%; background: radial-gradient(ellipse, #eabf673b, transparent 70%); z-index: -1; pointer-events: none; }
+.aw-orbits { position: absolute; inset: 0 0 14%; pointer-events: none; z-index: 4; }
+.aw-orbit { position: absolute; inset: 7%; animation: aw-orbit 21s linear infinite; }
+.aw-orbit--2 { inset: 1% 4% 5%; animation-duration: 28s; animation-direction: reverse; }
+.aw-orbit--3 { inset: 10% 0 0; animation-duration: 34s; animation-delay: -11s; }
+.aw-puzzle { position: absolute; width: 15%; aspect-ratio: 1; left: 1%; top: 12%; animation: aw-counter-orbit 21s linear infinite; filter: drop-shadow(0 3px 1px #071e1655); }
+.aw-puzzle svg { width: 100%; height: 100%; display: block; }
+.aw-puzzle--coral { color: #df5141; }
+.aw-puzzle--sage { color: #98b882; animation-duration: 28s; animation-direction: reverse; left: 81%; top: 18%; }
+.aw-puzzle--blush { color: #edb1a2; animation-duration: 34s; animation-delay: -11s; width: 12%; left: 42%; top: 91%; }
+.aw-comet { position: absolute; top: 0; left: 45%; width: 5px; height: 5px; background: #ffe7b0; border-radius: 50%; box-shadow: 0 0 6px 2px #efbc6570; }
+.aw-orbit--2 .aw-comet { top: 77%; left: 91%; width: 4px; height: 4px; }
+.aw-orbit--3 .aw-comet { top: 80%; left: 14%; }
+.aw-trail { position: absolute; left: -2%; top: 30%; width: 105%; height: 39%; border-radius: 50%; border: 1px solid #e8b76c75; pointer-events: none; transform: rotate(-22deg); }
+.aw-trail--back { z-index: 1; border-left-color: transparent; border-bottom-color: transparent; animation: aw-trail-drift 8s ease-in-out infinite alternate; }
+.aw-trail--front { z-index: 5; top: 43%; border-top-color: transparent; border-right-color: transparent; border-left-color: #f7cc8d70; transform: rotate(-16deg); animation: aw-trail-drift 10s ease-in-out -3s infinite alternate-reverse; }
+.aw-stars { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+.aw-stars span { position: absolute; display: block; color: #f5d18b; line-height: 1; animation: aw-twinkle 3.3s ease-in-out var(--twinkle-delay, 0s) infinite; }
+.aw-burst { position: absolute; left: 50%; top: 40%; width: 1px; height: 1px; z-index: 9; pointer-events: none; }
+.aw-burst--gingerbread { left: 15%; top: 77%; }
+.aw-burst--gift { left: 85%; top: 80%; }
+.aw-burst i { position: absolute; left: 0; top: 0; font-size: var(--burst-size); color: #ffe4a7; font-style: normal; line-height: 1; opacity: 0; animation: aw-particle .85s cubic-bezier(.16,.65,.3,1) var(--burst-delay) both; }
+.animated-world--compact { max-width: 290px; }
+@keyframes aw-heart-float { 0%,100% { transform: translateY(1%) rotate(-3deg); } 50% { transform: translateY(-2.8%) rotate(2deg); } }
+@keyframes aw-heart-pop { 0% { transform: scale(1); } 22% { transform: scale(.89,.94) rotate(-3deg); } 48% { transform: scale(1.09,1.06) rotate(3deg); } 72% { transform: scale(.98,1.02) rotate(-1deg); } 100% { transform: scale(1); } }
+@keyframes aw-gingerbread-sway { 0%,100% { transform: rotate(-4deg); } 50% { transform: rotate(5deg) translateY(-2%); } }
+@keyframes aw-gingerbread-jump { 0%,100% { transform: translateY(0) rotate(0); } 14% { transform: translateY(2%) scale(1.06,.9); } 38% { transform: translateY(-22%) rotate(-12deg) scale(.96,1.04); } 58% { transform: translateY(-15%) rotate(11deg); } 78% { transform: translateY(0) scale(1.05,.95); } }
+@keyframes aw-gift-rock { 0%,62%,100% { transform: rotate(0); } 68%,80% { transform: rotate(-5deg); } 74%,86% { transform: rotate(5deg); } 92% { transform: rotate(-2deg); } }
+@keyframes aw-gift-pop { 0% { transform: scale(1); } 25% { transform: scale(.92, .87); } 55% { transform: translateY(-11%) scale(1.1) rotate(-7deg); } 80% { transform: scale(1.02) rotate(4deg); } 100% { transform: scale(1); } }
+@keyframes aw-orbit { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+@keyframes aw-counter-orbit { from { transform: rotate(0); } to { transform: rotate(-360deg); } }
+@keyframes aw-twinkle { 0%,100% { opacity: .35; transform: scale(.7) rotate(0); } 48% { opacity: 1; transform: scale(1.1) rotate(15deg); } }
+@keyframes aw-trail-drift { from { transform: rotate(-23deg) scale(.97); opacity: .45; } to { transform: rotate(-14deg) scale(1.03); opacity: .9; } }
+@keyframes aw-breathe { from { opacity: .45; transform: scale(.92); } to { opacity: 1; transform: scale(1.06); } }
+@keyframes aw-particle { 0% { opacity: 0; transform: translate(-50%,-50%) scale(.3); } 12% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--burst-x),var(--burst-y)) rotate(var(--burst-turn)) scale(.4); } }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .aw-toy:hover { filter: brightness(1.07); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animated-world *, .animated-world *::before, .animated-world *::after { animation: none !important; transition: none !important; }
+  .aw-burst { display: none; }
+  .aw-puzzle--coral { transform: rotate(-15deg); }
+  .aw-puzzle--sage { transform: rotate(18deg); }
+  .aw-puzzle--blush { transform: rotate(30deg); }
+}

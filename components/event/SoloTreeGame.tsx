@@ -1,0 +1,264 @@
+"use client";
+
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Crown, Hand, Leaf, LoaderCircle, Pencil, RotateCcw, Smartphone, Sparkles, Star, TreePine, Trophy, WifiOff } from "lucide-react";
+import { formatTreeHeight, levelName, type TreeAction, type TreeLeaderboard, type TreePlayer, type TreeResponse } from "@/lib/tree-contracts";
+import useTreeShake from "./useTreeShake";
+import { GrowthQueue, type GrowthSnapshot } from "./tree-growth-queue";
+import "./solo-tree-game.css";
+
+type SessionState = { player: TreePlayer | null; loading: boolean; error: string; pending: number; saving: boolean; retry: boolean; notice: string };
+const INITIAL: SessionState = { player: null, loading: true, error: "", pending: 0, saving: false, retry: false, notice: "" };
+const sessions = new Map<string, TreeSession>();
+
+async function treeRequest<T>(url: string, action?: TreeAction, signal?: AbortSignal): Promise<T> {
+  const ownController = signal ? null : new AbortController();
+  const timeout = ownController ? setTimeout(() => ownController.abort(), 12000) : null;
+  try {
+    const response = await fetch(url, action ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action), keepalive: true, signal: signal || ownController?.signal } : { cache: "no-store", signal: signal || ownController?.signal });
+    const data = await response.json() as T & { error?: string; code?: string };
+    if (!response.ok) throw Object.assign(new Error(data.error || "小樹暫時連不上，請再試一次。"), { status: response.status, code: data.code });
+    return data;
+  } finally { if (timeout) clearTimeout(timeout); }
+}
+function failureText(error: unknown) { return error instanceof Error && error.name !== "AbortError" ? error.message : "連線有點慢，小樹的成長還在等待儲存。"; }
+
+// Web Locks serialize the canonical cross-tab queue, while requests keep their
+// idempotency IDs outside the lock. Without Web Locks, pending work is tab-local.
+class TreeSession {
+  state: SessionState = { ...INITIAL };
+  readonly token: string;
+  private snapshot: GrowthSnapshot | null = null;
+  private growthQueue: GrowthQueue | null = null;
+  private identityReady = false;
+  private listeners = new Set<(state: SessionState) => void>();
+  private inFlight: Promise<void> | null = null;
+  private loadFlight: Promise<void> | null = null;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryCount = 0;
+  private lastInput = 0;
+  private readonly storageKey: string;
+
+  constructor(token: string) {
+    this.token = token;
+    this.storageKey = `tzai-tree-growth:${token || "guest"}`;
+    const flushOnLeave = () => { void this.flush(); };
+    window.addEventListener("pagehide", flushOnLeave);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushOnLeave(); });
+    window.addEventListener("online", flushOnLeave);
+    window.addEventListener("storage", event => {
+      if (event.key !== this.storageKey || !this.growthQueue) return;
+      const queue = this.growthQueue;
+      void queue.refresh().then(snapshot => {
+        if (queue !== this.growthQueue) return;
+        const wasBatch = !!this.snapshot?.batch;
+        this.updateSnapshot(snapshot);
+        if (wasBatch && !snapshot.batch) void this.load();
+        else if (this.state.pending && !this.flushTimer && !this.inFlight) this.schedule(1000);
+      }).catch(() => this.publish({ error: "暫時讀不到待儲存的星光，請重新連線。", retry: true }));
+    });
+  }
+  subscribe(listener: (state: SessionState) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+  private publish(patch: Partial<SessionState> = {}) {
+    this.state = { ...this.state, ...patch, pending: (this.snapshot?.waiting || 0) + (this.snapshot?.batch?.count || 0) };
+    for (const listener of this.listeners) listener(this.state);
+  }
+  accept(player: TreePlayer | null) {
+    if (!player) { if (!this.state.player) this.publish({ player: null }); return; }
+    if (this.state.player?.id === player.id && player.revision < this.state.player.revision) return;
+    if (this.state.player && this.state.player.id !== player.id) { this.snapshot = null; this.growthQueue = null; }
+    this.publish({ player });
+  }
+  private updateSnapshot(snapshot: GrowthSnapshot) {
+    if (snapshot.playerId !== this.state.player?.id) return;
+    this.snapshot = snapshot;
+    this.publish(!snapshot.waiting && !snapshot.batch && this.state.retry ? { retry: false, error: "" } : {});
+  }
+  private configureQueue() {
+    if (this.growthQueue || !this.state.player) return;
+    let tail = Promise.resolve();
+    const serial = <T,>(work: () => T | Promise<T>): Promise<T> => {
+      const next = tail.then(work, work); tail = next.then(() => undefined, () => undefined); return next;
+    };
+    const hasLocks = !!navigator.locks?.request;
+    const lockName = `${this.storageKey}:${this.state.player.id}`;
+    const transaction = async <T,>(work: () => T | Promise<T>): Promise<T> => hasLocks ? await navigator.locks.request(lockName, async () => await work()) : await serial(work);
+    const storage = hasLocks ? localStorage : sessionStorage;
+    this.growthQueue = new GrowthQueue(this.storageKey, this.state.player.id, storage, transaction, () => crypto.randomUUID());
+  }
+  private async refreshQueue() {
+    this.configureQueue(); const queue = this.growthQueue;
+    if (queue) { const snapshot = await queue.refresh(); if (queue === this.growthQueue) this.updateSnapshot(snapshot); }
+  }
+  private async clearOwner() {
+    const oldQueue = this.growthQueue;
+    this.snapshot = null; this.growthQueue = null; this.identityReady = false;
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
+    this.publish({ player: null, retry: false, saving: false, error: "", notice: "" });
+    if (oldQueue) await oldQueue.clear();
+  }
+  private schedule(delay: number) {
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+    this.flushTimer = setTimeout(() => { this.flushTimer = null; void this.flush(); }, delay);
+  }
+  async load() {
+    if (this.loadFlight) return this.loadFlight;
+    this.publish({ loading: !this.state.player, error: this.state.retry ? this.state.error : "" });
+    this.loadFlight = (async () => {
+      try {
+        const result = await treeRequest<TreeResponse>(`/api/tree${this.token ? `?token=${encodeURIComponent(this.token)}` : ""}`);
+        if (!result.player) await this.clearOwner(); else this.accept(result.player);
+        this.identityReady = true;
+        await this.refreshQueue(); this.publish({ loading: false, error: this.state.retry ? this.state.error : "" });
+        if (this.state.player && this.state.pending) void this.flush();
+      } catch (error) { this.publish({ loading: false, error: failureText(error) }); }
+      finally { this.loadFlight = null; }
+    })();
+    return this.loadFlight;
+  }
+  async name(action: "register" | "rename", name: string) {
+    if (!this.identityReady) throw new Error("請先重新連線，找到你的小樹後再繼續。");
+    const result = await treeRequest<TreeResponse>("/api/tree", { action, name, ...(this.token ? { token: this.token } : {}) });
+    this.accept(result.player); await this.refreshQueue(); this.publish({ error: "", loading: false, notice: action === "register" ? "小樹種好了，第一點星光就交給你。" : "新的名字，已經掛上小樹了。" });
+    return result.player;
+  }
+  async queue(): Promise<boolean> {
+    if (!this.state.player || this.state.loading) return false;
+    const now = Date.now();
+    if (now - this.lastInput < 360) return false;
+    this.lastInput = now;
+    try {
+      this.configureQueue(); const queue = this.growthQueue; if (!queue) return false;
+      const result = await queue.enqueue(); if (queue !== this.growthQueue) return false;
+      this.updateSnapshot(result.snapshot);
+      if (!result.accepted) { this.publish({ notice: "先把這些星光存好，再繼續搖搖吧。" }); return false; }
+      this.publish({ notice: "" });
+      if (!this.flushTimer && !this.inFlight) this.schedule(1000);
+      return true;
+    } catch { this.publish({ error: "這個分頁暫時無法保存待送的星光，請重新整理再試。" }); return false; }
+  }
+  flush(): Promise<void> {
+    if (this.inFlight) return this.inFlight;
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
+    if (!this.state.player || !this.growthQueue) return Promise.resolve();
+    const queue = this.growthQueue;
+    this.inFlight = (async () => {
+      let ok = false; let delay = 1000;
+      try {
+        const take = await queue.take();
+        if (queue !== this.growthQueue) return;
+        this.updateSnapshot(take.snapshot);
+        const batch = take.batch;
+        if (!batch) { ok = true; delay = Math.max(100, take.waitMs); return; }
+        this.publish({ saving: true });
+        const result = await treeRequest<TreeResponse>("/api/tree", { action: "grow", ...batch, ...(this.token ? { token: this.token } : {}) });
+        if (queue !== this.growthQueue) return;
+        this.accept(result.player);
+        const acknowledged = await queue.acknowledge(batch.requestId);
+        if (queue !== this.growthQueue) return;
+        this.updateSnapshot(acknowledged); this.retryCount = 0; ok = true;
+        this.publish({ saving: false, retry: false, error: "", notice: typeof result.awarded === "number" && result.awarded < batch.count ? `這次存入 ${result.awarded} 點星光，慢慢搖，小樹才跟得上。` : "" });
+      } catch (error) {
+        if (queue !== this.growthQueue) return;
+        this.retryCount += 1; this.publish({ saving: false, retry: true, error: failureText(error) });
+        if ((error as { code?: string }).code === "tree_not_registered") { await this.clearOwner(); void this.load(); }
+      } finally {
+        this.inFlight = null;
+        if (this.state.pending) this.schedule(ok ? delay : Math.min(15000, 1500 * 2 ** Math.min(this.retryCount, 3)));
+      }
+    })();
+    return this.inFlight;
+  }
+}
+
+function useTreeSession(token: string) {
+  const [state, setState] = useState<SessionState>({ ...INITIAL });
+  const session = useRef<TreeSession | null>(null);
+  useEffect(() => {
+    let active = true; let unsubscribe = () => {};
+    const start = setTimeout(() => {
+      let current = sessions.get(token || "guest");
+      if (!current) { current = new TreeSession(token); sessions.set(token || "guest", current); }
+      session.current = current;
+      unsubscribe = current.subscribe(next => { if (active) setState(next); });
+      setState(current.state); void current.load();
+    }, 0);
+    return () => { active = false; clearTimeout(start); unsubscribe(); void session.current?.flush(); session.current = null; };
+  }, [token]);
+  return { state, session };
+}
+
+export default function SoloTreeGame({ token = "", onChange, active = true }: { token?: string; onChange?: () => void; active?: boolean }) {
+  return <SoloTreeSession key={token || "guest"} token={token} onChange={onChange} active={active}/>;
+}
+
+function SoloTreeSession({ token, onChange, active }: { token: string; onChange?: () => void; active: boolean }) {
+  const { state, session } = useTreeSession(token);
+  const [tab, setTab] = useState<"play" | "leaderboard">("play");
+  const [name, setName] = useState(""); const [naming, setNaming] = useState(false); const [editing, setEditing] = useState(false); const [nameError, setNameError] = useState("");
+  const [bounce, setBounce] = useState(0);
+  const previousGrowth = useRef<number | null>(null); const callback = useRef(onChange);
+  const player = state.player;
+  function grow() { void session.current?.queue().then(accepted => { if (accepted) setBounce(n => n + 1); }); }
+  const motion = useTreeShake({ onShake: grow, enabled: active && !!player && tab === "play" && !editing });
+  useEffect(() => { callback.current = onChange; }, [onChange]);
+  useEffect(() => { if (!player) return; if (previousGrowth.current !== null && player.growth > previousGrowth.current) callback.current?.(); previousGrowth.current = player.growth; }, [player]);
+
+  async function saveName(event: FormEvent) {
+    event.preventDefault(); const trimmed = name.trim();
+    if (Array.from(trimmed).length < 2 || Array.from(trimmed).length > 16) { setNameError("暱稱請填 2～16 個字。"); return; }
+    if (naming || !session.current) return;
+    setNaming(true); setNameError("");
+    try { await session.current.name(player ? "rename" : "register", trimmed); setEditing(false); }
+    catch (error) { setNameError(failureText(error)); }
+    finally { setNaming(false); }
+  }
+  function editName() { if (player) setName(player.name); setNameError(""); setEditing(true); }
+  const shape = player ? Math.min(.98, .54 + Math.log2(1 + player.growth / 8) * .075) : .55;
+  const showForm = !player || editing;
+  return <section className={`stg stg-view-${tab} ${showForm ? "stg-naming" : ""}`} aria-label="搖搖耶誕樹">
+    <header className="stg-heading"><span>GROW A LITTLE CHRISTMAS</span><h1>搖搖耶誕樹</h1><p>{player ? "搖一搖，讓你的星光慢慢長大。" : "取個名字，種下你自己的耶誕樹。"}</p></header>
+    <nav className="stg-tabs" aria-label="耶誕樹遊戲分頁"><button className={tab === "play" ? "is-active" : ""} aria-current={tab === "play" ? "page" : undefined} onClick={() => setTab("play")}><TreePine size={17}/>遊玩</button><button className={tab === "leaderboard" ? "is-active" : ""} aria-current={tab === "leaderboard" ? "page" : undefined} onClick={() => { void session.current?.flush(); setEditing(false); setTab("leaderboard"); }}><Trophy size={17}/>排行榜</button></nav>
+    {tab === "leaderboard" ? <TreeRanking token={token} player={player} onPlayer={next => session.current?.accept(next)} onPlay={() => setTab("play")}/> : <div className={`stg-play ${showForm ? "stg-play-form" : ""}`}>
+      {!showForm && player && <div className="stg-player-heading"><button className="stg-name" onClick={editName} aria-label={`編輯暱稱，目前是${player.name}`}><span>{player.name}</span><Pencil size={13}/></button><div className="stg-stats"><span><strong>{formatTreeHeight(player.heightCm)}</strong><small>小樹高度</small></span><span><strong>#{player.rank}</strong><small>目前排名</small></span><span><strong>{levelName(player.level)}</strong><small>第 {player.level} 階段</small></span></div></div>}
+      <div className="stg-tree-space"><div className="stg-tree-sizer" style={{ "--tree-scale": shape } as CSSProperties}><button className="stg-tree" onClick={grow} disabled={!player || editing || state.loading} aria-label={player ? "點一下，讓我的耶誕樹成長" : "等待種下的小小耶誕樹"}><span className="stg-aura" aria-hidden="true"/><span className={`stg-tree-inner ${bounce ? "stg-tree-growing" : ""}`} key={`tree-${bounce}`}><img src="/assets/christmas-tree.webp" alt="暖暖的耶誕樹"/></span><span className="stg-tree-stars" aria-hidden="true">{[0,1,2,3,4,5].map(i => <i key={i} style={{ "--i": i } as CSSProperties}>✧</i>)}</span>{bounce > 0 && <span key={`spark-${bounce}`} className="stg-growth-spark" aria-hidden="true">✧</span>}</button></div><span className="stg-ground" aria-hidden="true"/>{!showForm && <p className="stg-tree-hint"><Hand size={12}/>也可以點小樹，讓它慢慢長大</p>}</div>
+      <div className="stg-play-controls">
+        {state.loading ? <div className="stg-loading" role="status"><LoaderCircle size={17}/>正在找到你的小樹…</div> : showForm ? <form className="stg-name-form" onSubmit={saveName}><label htmlFor="solo-tree-name">{editing ? "替小樹換個暱稱" : "你想讓大家怎麼稱呼你？"}<small>{Array.from(name).length} / 16</small></label><div className="stg-name-input"><input id="solo-tree-name" value={name} onChange={event => setName(Array.from(event.target.value).slice(0,16).join(""))} autoComplete="nickname" placeholder="輸入 2～16 字暱稱" maxLength={32} disabled={naming}/>{editing && <button type="button" className="stg-cancel" onClick={() => setEditing(false)} disabled={naming}>取消</button>}</div>{(nameError || state.error) && <p className="stg-error" role="alert">{nameError || state.error}{state.error && !nameError && <button type="button" onClick={() => void session.current?.load()}>重試</button>}</p>}<button className="stg-primary" type="submit" disabled={naming || (!player && !!state.error) || Array.from(name.trim()).length < 2}>{naming ? <LoaderCircle className="stg-spinner" size={17}/> : <Leaf size={17}/>} {editing ? "儲存暱稱" : "種下我的耶誕樹"}<ArrowRight size={17}/></button><p className="stg-name-note">暱稱會出現在排行榜，隨時都可以修改。</p></form> : <>
+          <div className={`stg-save-state ${state.retry ? "has-error" : ""}`} role="status">{state.retry ? <WifiOff size={12}/> : state.pending ? <LoaderCircle className="stg-spinner" size={12}/> : <Check size={12}/>}<span>{state.retry ? `${state.pending} 點星光等待重試` : state.pending ? `${state.pending} 點星光・${state.saving ? "儲存中" : "等待儲存"}` : "成長已儲存，下次回來繼續長大"}</span>{state.retry && <button onClick={() => void session.current?.flush()}>重試</button>}</div>
+          {state.error && <p className="stg-error" role="alert">{state.error}</p>}
+          <div className="stg-grow-actions"><button className="stg-primary" onClick={grow}><Sparkles size={18}/>點一下，長大一點</button><button className={`stg-motion ${motion.status === "listening" ? "is-listening" : ""}`} aria-pressed={motion.status === "listening"} onClick={() => motion.status === "listening" ? motion.stop() : void motion.start()}><Smartphone size={19}/><span>{motion.status === "listening" ? "暫停搖搖" : motion.status === "paused" ? "繼續搖搖" : "開啟搖搖"}</span></button></div>
+          <p className="stg-motion-note">{(motion.status !== "idle" ? motion.message : state.notice || motion.message) || "輕輕搖動手機，或點按小樹，都能長大。"}</p>
+        </>}
+      </div>
+    </div>}
+  </section>;
+}
+
+function TreeRanking({ token, player, onPlayer, onPlay }: { token: string; player: TreePlayer | null; onPlayer: (player: TreePlayer | null) => void; onPlay: () => void }) {
+  const [page, setPage] = useState(1); const [board, setBoard] = useState<TreeLeaderboard | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [retry, setRetry] = useState(0);
+  const callback = useRef(onPlayer);
+  useEffect(() => { callback.current = onPlayer; }, [onPlayer]);
+  useEffect(() => {
+    let active = true, inFlight = false; let timer: ReturnType<typeof setTimeout> | null = null; let controller: AbortController | null = null;
+    const schedule = () => { timer = setTimeout(() => { if (document.visibilityState === "visible") void load(); else schedule(); }, 5000); };
+    const load = async () => {
+      if (!active || inFlight) return;
+      inFlight = true; controller = new AbortController(); const timeout = setTimeout(() => controller?.abort(), 12000);
+      try {
+        const next = await treeRequest<TreeLeaderboard>(`/api/tree/leaderboard?${new URLSearchParams({ page: String(page), ...(token ? { token } : {}) })}`, undefined, controller.signal);
+        if (!active) return; setBoard(next); setError(""); callback.current(next.player);
+      } catch (cause) { if (active) setError(failureText(cause)); }
+      finally { clearTimeout(timeout); inFlight = false; if (active) { setLoading(false); schedule(); } }
+    };
+    const begin = setTimeout(() => { setLoading(true); void load(); }, 0);
+    const visible = () => { if (document.visibilityState === "visible") { if (timer) clearTimeout(timer); void load(); } };
+    document.addEventListener("visibilitychange", visible);
+    return () => { active = false; clearTimeout(begin); if (timer) clearTimeout(timer); controller?.abort(); document.removeEventListener("visibilitychange", visible); };
+  }, [page, retry, token]);
+  const totalPages = Math.max(1, Math.ceil((board?.total || 0) / 5));
+  const own = board?.player || player;
+  return <div className="stg-ranking"><div className="stg-ranking-intro"><span><Trophy size={14}/>誰的小樹，最靠近星星？</span><small>{board ? `${board.total} 棵小樹一起長大` : "正在看看大家的小樹"}</small></div>
+    {error ? <div className="stg-board-empty"><WifiOff size={28}/><p>{error}</p><button className="stg-board-retry" onClick={() => setRetry(n => n + 1)}><RotateCcw size={15}/>重新讀取</button></div> : loading && !board ? <div className="stg-board-empty" role="status"><LoaderCircle className="stg-spinner" size={26}/><p>星光排行榜載入中…</p></div> : board?.entries.length ? <ol className="stg-ranking-list" start={(page - 1) * 5 + 1}>{board.entries.map(entry => <li key={entry.id} className={`${entry.rank <= 3 ? `stg-top-${entry.rank}` : ""} ${entry.id === own?.id ? "stg-own-row" : ""}`}><span className="stg-rank-place">{entry.rank <= 3 ? <Crown size={19}/> : <span>{entry.rank}</span>}{entry.rank <= 3 && <small>{entry.rank}</small>}</span><span className="stg-rank-name"><strong>{entry.name}</strong><small>{entry.id === own?.id ? "你的小樹" : levelName(entry.level)}</small></span><span className="stg-rank-height">{formatTreeHeight(entry.heightCm)}<TreePine size={14}/></span></li>)}</ol> : <div className="stg-board-empty"><TreePine size={38}/><h2>第一棵小樹，會是你嗎？</h2><p>取個名字，開始收集你的星光。</p><button className="stg-board-retry" onClick={onPlay}>去種小樹<ArrowRight size={15}/></button></div>}
+    <div className="stg-rank-bottom">{own ? <div className="stg-my-rank"><span><Star size={13}/>我的小樹</span><strong>第 {board?.myRank || own.rank} 名</strong><span>{formatTreeHeight(own.heightCm)}</span></div> : <button className="stg-join-ranking" onClick={onPlay}>種下小樹，加入排行榜<ArrowRight size={15}/></button>}<div className="stg-rank-pages"><button aria-label="排行榜上一頁" disabled={page <= 1 || loading} onClick={() => { setPage(p => p - 1); setLoading(true); }}><ChevronLeft size={19}/></button><span>{page} / {totalPages}</span><button aria-label="排行榜下一頁" disabled={page >= totalPages || loading} onClick={() => { setPage(p => p + 1); setLoading(true); }}><ChevronRight size={19}/></button></div></div>
+  </div>;
+}
