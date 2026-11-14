@@ -41,3 +41,12 @@
 @media(max-height:620px){.stg{padding:17px 18px 8px;gap:6px}.stg-heading h1{font-size:22px}.stg-heading>p{font-size:9px}.stg-name{min-height:25px}.stg-stats strong{font-size:17px}.stg-stats>span:last-child strong{font-size:10px}.stg-growth-meter{margin-top:2px;gap:3px}.stg-growth-meter>span{font-size:7px}.stg-grow-actions>.stg-shake-action{min-height:44px;font-size:11px!important}.stg-motion-note{font-size:8px;min-height:24px}.stg-tree-space{padding-top:3px}}
 @media(prefers-reduced-motion:reduce){.stg-growth-burst{display:none}.stg-tree-growth{will-change:auto}.stg-scene-halo{opacity:.7}.stg-shake-action:before{display:none}}
 .motion-paused .stg-growth-burst,.motion-paused .stg-shake-action:before{display:none}.motion-paused .stg-tree-growth{will-change:auto}
+/* All six paintings share one bounded canvas. Images crossfade without remounting on each shake. */
+.stg-stage-art{display:block;position:relative;width:100%;height:100%;transform-origin:50% 92%;animation:stg-tree-sway 6s ease-in-out infinite}
+.stg-tree .stg-stage-image{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;animation:none;opacity:0;transform:translateY(10px) scale(.92);filter:blur(5px);transition:opacity .85s ease,transform 1.05s cubic-bezier(.16,1,.3,1),filter .85s ease;transform-origin:50% 92%}
+.stg-tree .stg-stage-image.is-current{opacity:1;transform:translateY(0) scale(1);filter:drop-shadow(0 6px 8px #001d1966)}
+.stg-tree .stg-stage-fallback{position:absolute;inset:0;object-fit:contain;animation:none}
+.stg-rank-height .stg-rank-tree{width:27px;height:37px;object-fit:contain;flex:none;filter:drop-shadow(0 1px 2px #001d1966)}
+@media(max-height:620px){.stg-rank-height .stg-rank-tree{width:21px;height:29px}}
+@media(prefers-reduced-motion:reduce){.stg-stage-art{animation:none}.stg-tree .stg-stage-image{transition:none;transform:none;filter:none}}
+.motion-paused .stg-stage-art{animation:none}.motion-paused .stg-tree .stg-stage-image{transition:none;transform:none;filter:none}
