@@ -1,0 +1,18 @@
+.scene-transition{position:relative;display:flex;flex:1;min-height:0;width:100%;isolation:isolate;overflow:hidden}
+.scene-transition-content{position:relative;z-index:1;display:flex;flex:1;min-height:0;width:100%;transform-origin:50% 55%;outline:none}
+.scene-transition .app-screen{animation:none}
+.scene-transition[data-transitioning=true]>.scene-transition-content{pointer-events:none;will-change:transform,opacity}
+.scene-transition-ghosts,.scene-transition-effects{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.scene-transition-ghosts{z-index:2}
+.scene-transition-ghost{position:absolute;inset:0;width:100%;height:100%;margin:0;pointer-events:none;user-select:none}
+.scene-transition-effects{z-index:3}
+.scene-transition-glow{position:absolute;inset:8% -20%;display:block;background:radial-gradient(ellipse at 50% 47%,#f4d79f24,transparent 62%);opacity:0;transform-origin:center}
+.scene-transition-piece{position:absolute;left:23%;top:45%;width:18px;height:18px;color:#f1ce83;opacity:0;filter:drop-shadow(0 0 8px #ebce7566)}
+.scene-transition-piece svg{display:block;width:100%;height:100%;fill:#f1ce8322}
+.scene-transition-piece-1{left:51%;top:36%;width:24px;height:24px;color:#e6b779}
+.scene-transition-piece-2{left:74%;top:53%;width:14px;height:14px}
+@keyframes scene-leave{from{opacity:var(--scene-old-opacity,1);transform:var(--scene-old-transform,translate3d(0,0,0))}to{opacity:0;transform:translate3d(calc(var(--scene-direction,1)*-18px),-5px,0) scale(.985)}}
+@keyframes scene-arrive{from{opacity:0;transform:translate3d(calc(var(--scene-direction,1)*24px),12px,0) scale(.985)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
+@keyframes scene-glow{0%{opacity:0;transform:translateX(calc(var(--scene-direction,1)*-8%)) scale(.75)}40%{opacity:.72;transform:translateX(0) scale(1)}100%{opacity:0;transform:translateX(calc(var(--scene-direction,1)*8%)) scale(1.12)}}
+@keyframes scene-piece{0%{opacity:0;transform:translate3d(0,9px,0) rotate(-12deg) scale(.6)}35%{opacity:.72;transform:translate3d(0,-4px,0) rotate(3deg) scale(1)}100%{opacity:0;transform:translate3d(var(--piece-distance,12px),-28px,0) rotate(13deg) scale(.75)}}
+@media(prefers-reduced-motion:reduce){.scene-transition-glow,.scene-transition-piece{display:none}.scene-transition *{scroll-behavior:auto}.scene-transition-content{animation:none!important;transform:none!important;opacity:1!important}}

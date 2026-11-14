@@ -4,7 +4,7 @@ import { createTreeShakeState, detectTreeShake } from "@/lib/tree-shake";
 
 export type TreeShakeStatus = "idle" | "listening" | "denied" | "unavailable" | "paused";
 type MotionPermissionClass = typeof DeviceMotionEvent & { requestPermission?: () => Promise<"granted" | "denied"> };
-const IDLE_MESSAGE = "可以輕輕左右搖，也可以直接點按耶誕樹。";
+const IDLE_MESSAGE = "輕輕左右搖動手機，把星光送給小樹。";
 
 /**
  * Motion is optional. Call start directly from a click, never from an effect.
@@ -32,14 +32,14 @@ export function useTreeShake({ onShake, enabled }: { onShake: () => void; enable
   }, []);
   const stop = useCallback(() => {
     detach();
-    if (mounted.current) { setStatus("paused"); setMessage("搖動已暫停，點按一樣可以讓樹長大。"); }
+    if (mounted.current) { setStatus("paused"); setMessage("搖動已暫停，小樹會等你回來。"); }
   }, [detach]);
 
   const start = useCallback(async () => {
     if (!enabled || !mounted.current || pending.current || active.current) return;
-    if (document.visibilityState !== "visible") { setStatus("paused"); setMessage("回到遊戲後，按一下就能繼續搖樹。"); return; }
+    if (document.visibilityState !== "visible") { setStatus("paused"); setMessage("回到遊戲後，就能繼續開啟搖動。"); return; }
     const motion = window.DeviceMotionEvent as MotionPermissionClass | undefined;
-    if (!window.isSecureContext || !motion) { setStatus("unavailable"); setMessage("這個瀏覽器無法感應搖動，直接點按耶誕樹也能玩。"); return; }
+    if (!window.isSecureContext || !motion) { setStatus("unavailable"); setMessage("這個裝置暫時聽不到搖動。小樹會在這裡陪你。"); return; }
     detach();
     const run = generation.current;
     pending.current = true;
@@ -47,10 +47,10 @@ export function useTreeShake({ onShake, enabled }: { onShake: () => void; enable
       if (typeof motion.requestPermission === "function") {
         // Do not defer this call: iOS requires this same user-activation turn.
         const permission = motion.requestPermission();
-        setMessage("請允許動作感測，或直接點按耶誕樹。");
+        setMessage("允許動作感測，就能把搖動變成星光。");
         const result = await permission;
         if (!mounted.current || generation.current !== run) return;
-        if (result !== "granted") { pending.current = false; setStatus("denied"); setMessage("沒有開啟動作感測，點按耶誕樹一樣可以玩。"); return; }
+        if (result !== "granted") { pending.current = false; setStatus("denied"); setMessage("搖動尚未開啟，沒關係，我們慢慢來。"); return; }
       }
       if (!mounted.current || generation.current !== run || document.visibilityState !== "visible") return;
       pending.current = false; active.current = true;
@@ -69,20 +69,20 @@ export function useTreeShake({ onShake, enabled }: { onShake: () => void; enable
           receivedData = true;
           if (availabilityTimer.current) clearTimeout(availabilityTimer.current);
           availabilityTimer.current = null;
-          setMessage("輕輕左右搖一搖，或點按耶誕樹。");
+          setMessage("輕輕左右搖一搖，感受小樹的回應。");
         }
         if (result.shake) callback.current();
       };
       listener.current = onMotion;
       window.addEventListener("devicemotion", onMotion, { passive: true });
-      setStatus("listening"); setMessage("正在感應手機動作，也可以先點按耶誕樹。");
+      setStatus("listening"); setMessage("正在聽你的節奏，試著輕輕左右搖動。");
       availabilityTimer.current = setTimeout(() => {
         if (!mounted.current || generation.current !== run || receivedData) return;
-        detach(); setStatus("unavailable"); setMessage("目前沒有收到動作感測，直接點按耶誕樹就能繼續玩。");
+        detach(); setStatus("unavailable"); setMessage("暫時沒有收到手機動作。小樹仍在這裡，等你的星光。");
       }, 3000);
     } catch {
       if (!mounted.current || generation.current !== run) return;
-      detach(); setStatus("denied"); setMessage("暫時無法開啟動作感測，點按耶誕樹一樣可以玩。");
+      detach(); setStatus("denied"); setMessage("這次沒有連上手機動作，稍後可以再試一次。");
     }
   }, [enabled, detach]);
 

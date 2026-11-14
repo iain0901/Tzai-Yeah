@@ -53,3 +53,25 @@ body:has(.love-app){background:#082a23 radial-gradient(ellipse at 50% 20%,#21544
 @keyframes music-bar-bounce{from{transform:scaleY(.5)}to{transform:scaleY(1.5)}}
 @media(max-height:620px){.app-music-pill{min-height:24px;font-size:9px;padding:2px 9px;margin-top:5px}.app-dock{gap:5px;padding-left:10px;padding-right:10px}.app-dock svg{width:22px;height:22px}.app-dock button{border-radius:14px}.app-menu>p{font-size:9px}}
 
+
+/* Phase-aware rooms: the same NFC link opens the current part of the story. */
+.app-entry-screen{height:100dvh;background:#103c32 url('/assets/grain.svg');color:#f5ddb1;display:flex;flex-direction:column;gap:18px;align-items:center;justify-content:center;font-size:13px}
+.app-entry-screen>svg,.app-connecting>svg{color:#e9c282;animation:entry-puzzle 1.8s ease-in-out infinite}
+.app-connecting{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;font-size:12px;color:#e6cd9e}
+.app-live-home{display:flex;flex-direction:column}.app-live-home:has(.app-waiting){display:grid;grid-template-rows:auto minmax(0,1fr) auto}.app-live-home>.app-text{margin-top:15px;flex:none}
+.app-phase-notice{position:relative;z-index:9;flex:none;margin:4px 12px 0;display:flex;gap:8px;align-items:center;justify-content:space-between;border-radius:10px;background:#f8e8c6;color:#74432c;padding:6px 10px;font-size:10px;box-shadow:0 5px 20px #082b2455;animation:phase-note-in .45s ease both}
+.app-phase-notice button{display:flex;align-items:center;gap:5px;color:#a44032;background:transparent;min-height:36px;white-space:nowrap}
+.app-dock{--dock-gap:7px;--dock-side:12px;position:relative;isolation:isolate;gap:var(--dock-gap);padding-left:var(--dock-side);padding-right:var(--dock-side)}
+.app-dock-cursor{position:absolute;left:var(--dock-side);top:9px;bottom:calc(9px + env(safe-area-inset-bottom,0px));width:calc((100% - 2*var(--dock-side) - 3*var(--dock-gap))/4);border-radius:19px;background:#b84c38 url('/assets/grain.svg');box-shadow:inset 0 1px 0 #f5bf9066,0 3px 8px #9b3b221a;transform:translateX(calc(var(--dock-index)*(100% + var(--dock-gap))));transition:transform .58s cubic-bezier(.22,1.2,.3,1);pointer-events:none;z-index:-1}
+.app-dock button.is-active{background:transparent;box-shadow:none}.app-dock button{transition:color .24s ease,transform .2s ease}.app-dock button:not(.is-active):hover{background:#ead9b944}
+.app-button{overflow:hidden;isolation:isolate}.app-button:before{content:'';position:absolute;inset:-100% -70%;background:linear-gradient(110deg,transparent 41%,#fffdf855 49%,transparent 57%);transform:translateX(-55%);transition:transform .7s ease;pointer-events:none;z-index:-1}.app-button:hover:before,.app-button:focus-visible:before{transform:translateX(55%)}
+.event-modal.app-dialog{transform-origin:50% 90%;animation:paper-dialog-open .48s cubic-bezier(.19,1,.22,1) both}.event-modal.app-dialog::backdrop{animation:paper-backdrop-in .35s ease both}.event-modal.is-closing{pointer-events:none;animation:paper-dialog-close .22s ease both!important}.event-modal.is-closing::backdrop{animation:paper-backdrop-in .22s ease reverse both}
+@keyframes entry-puzzle{0%,100%{transform:translateY(0) rotate(-8deg);opacity:.65}50%{transform:translateY(-8px) rotate(8deg);opacity:1}}
+@keyframes phase-note-in{from{opacity:0;transform:translateY(-15px)}to{opacity:1;transform:none}}
+@keyframes paper-dialog-open{from{opacity:0;transform:translateY(35px) scale(.9) rotate(1.5deg)}to{opacity:1;transform:none}}
+@keyframes paper-dialog-close{from{opacity:1;transform:none}to{opacity:0;transform:translateY(24px) scale(.96)}}
+@keyframes paper-backdrop-in{from{background:#08291f00;backdrop-filter:blur(0)}to{background:#08291fba;backdrop-filter:blur(4px)}}
+@media(max-height:740px){.app-dock-cursor{top:7px;bottom:calc(7px + env(safe-area-inset-bottom,0px))}}
+@media(max-height:620px){.app-dock{--dock-side:10px;--dock-gap:5px}.app-dock-cursor{top:5px;bottom:calc(5px + env(safe-area-inset-bottom,0px));border-radius:14px}.app-live-home>.app-text{margin-top:7px;min-height:34px}}
+@media(prefers-reduced-motion:reduce){.app-entry-screen>svg,.app-connecting>svg,.app-phase-notice,.event-modal.app-dialog,.event-modal.app-dialog::backdrop{animation:none!important}.app-dock-cursor,.app-button:before{transition:none!important}}
+.motion-paused .app-dialog::backdrop{animation:none!important;transition:none!important}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
-import { ArrowRight, Check, ChevronLeft, ChevronRight, Crown, Hand, Leaf, LoaderCircle, Pencil, RotateCcw, Smartphone, Sparkles, Star, TreePine, Trophy, WifiOff } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Crown, Leaf, LoaderCircle, Pencil, RotateCcw, Smartphone, Star, TreePine, Trophy, WifiOff } from "lucide-react";
 import { formatTreeHeight, levelName, type TreeAction, type TreeLeaderboard, type TreePlayer, type TreeResponse } from "@/lib/tree-contracts";
 import useTreeShake from "./useTreeShake";
 import { GrowthQueue, type GrowthSnapshot } from "./tree-growth-queue";
@@ -214,24 +214,52 @@ function SoloTreeSession({ token, onChange, active }: { token: string; onChange?
     finally { setNaming(false); }
   }
   function editName() { if (player) setName(player.name); setNameError(""); setEditing(true); }
-  const shape = player ? Math.min(.98, .54 + Math.log2(1 + player.growth / 8) * .075) : .55;
+  // The scene stays fixed: only the illustration grows, leaving every control in place.
+  const shape = player ? .32 + .64 * (1 - Math.exp(-player.growth / 85)) : .36;
+  const thresholds = [0, 10, 30, 75, 150, 300];
+  const stageStart = thresholds[(player?.level || 1) - 1];
+  const nextStage = thresholds[player?.level || 1];
+  const stageProgress = player ? nextStage ? (player.growth - stageStart) / (nextStage - stageStart) : 1 : 0;
+  const motionLabel = motion.status === "listening" ? "搖動已開啟 · 暫停" : motion.status === "paused" ? "繼續搖搖手機" : motion.status === "denied" || motion.status === "unavailable" ? "再試一次搖動" : "開啟搖搖手機";
   const showForm = !player || editing;
   return <section className={`stg stg-view-${tab} ${showForm ? "stg-naming" : ""}`} aria-label="搖搖耶誕樹">
     <header className="stg-heading"><span>GROW A LITTLE CHRISTMAS</span><h1>搖搖耶誕樹</h1><p>{player ? "搖一搖，讓你的星光慢慢長大。" : "取個名字，種下你自己的耶誕樹。"}</p></header>
     <nav className="stg-tabs" aria-label="耶誕樹遊戲分頁"><button className={tab === "play" ? "is-active" : ""} aria-current={tab === "play" ? "page" : undefined} onClick={() => setTab("play")}><TreePine size={17}/>遊玩</button><button className={tab === "leaderboard" ? "is-active" : ""} aria-current={tab === "leaderboard" ? "page" : undefined} onClick={() => { void session.current?.flush(); setEditing(false); setTab("leaderboard"); }}><Trophy size={17}/>排行榜</button></nav>
     {tab === "leaderboard" ? <TreeRanking token={token} player={player} onPlayer={next => session.current?.accept(next)} onPlay={() => setTab("play")}/> : <div className={`stg-play ${showForm ? "stg-play-form" : ""}`}>
-      {!showForm && player && <div className="stg-player-heading"><button className="stg-name" onClick={editName} aria-label={`編輯暱稱，目前是${player.name}`}><span>{player.name}</span><Pencil size={13}/></button><div className="stg-stats"><span><strong>{formatTreeHeight(player.heightCm)}</strong><small>小樹高度</small></span><span><strong>#{player.rank}</strong><small>目前排名</small></span><span><strong>{levelName(player.level)}</strong><small>第 {player.level} 階段</small></span></div></div>}
-      <div className="stg-tree-space"><div className="stg-tree-sizer" style={{ "--tree-scale": shape } as CSSProperties}><button className="stg-tree" onClick={grow} disabled={!player || editing || state.loading} aria-label={player ? "點一下，讓我的耶誕樹成長" : "等待種下的小小耶誕樹"}><span className="stg-aura" aria-hidden="true"/><span className={`stg-tree-inner ${bounce ? "stg-tree-growing" : ""}`} key={`tree-${bounce}`}><img src="/assets/christmas-tree.webp" alt="暖暖的耶誕樹"/></span><span className="stg-tree-stars" aria-hidden="true">{[0,1,2,3,4,5].map(i => <i key={i} style={{ "--i": i } as CSSProperties}>✧</i>)}</span>{bounce > 0 && <span key={`spark-${bounce}`} className="stg-growth-spark" aria-hidden="true">✧</span>}</button></div><span className="stg-ground" aria-hidden="true"/>{!showForm && <p className="stg-tree-hint"><Hand size={12}/>也可以點小樹，讓它慢慢長大</p>}</div>
+      {!showForm && player && <div className="stg-player-heading"><button className="stg-name" onClick={editName} aria-label={`編輯暱稱，目前是${player.name}`}><span>{player.name}</span><Pencil size={13}/></button><div className="stg-stats"><span><AnimatedHeight height={player.heightCm}/><small>小樹高度</small></span><span><strong className="stg-stat-change" key={`rank-${player.rank}`}>#{player.rank}</strong><small>目前排名</small></span><span><strong className="stg-stat-change" key={`level-${player.level}`}>{levelName(player.level)}</strong><small>第 {player.level} 階段</small></span></div><div className="stg-growth-meter" aria-label={nextStage ? `距離下一階段還有 ${nextStage - player.growth} 點星光` : "星光巨樹持續長高"}><div className="stg-growth-track" aria-hidden="true"><i style={{ transform: `scaleX(${Math.max(0, Math.min(1, stageProgress))})` }}/></div><span>{nextStage ? `再 ${nextStage - player.growth} 點星光，迎接${levelName(player.level + 1)}` : "星光正盛，還能繼續長高。"}</span></div></div>}
+      <div className={`stg-tree-space ${motion.status === "listening" ? "is-listening" : ""}`} style={{ "--tree-scale": shape, "--burst-y": `${92 - shape * 44}%` } as CSSProperties} data-growth-stage={player?.level || 0}><div className="stg-scene-halo" aria-hidden="true"/><div className="stg-scene-orbit" aria-hidden="true"/><div className="stg-tree-sizer"><button className="stg-tree" onClick={grow} disabled={!player || editing || state.loading} aria-label={player ? "為我的耶誕樹收集星光" : "等待種下的小小耶誕樹"}><span className="stg-tree-growth"><span className="stg-aura" aria-hidden="true"/><span className={`stg-tree-inner ${bounce ? "stg-tree-growing" : ""}`} key={`tree-${bounce}`}><img src="/assets/christmas-tree.webp" alt="暖暖的耶誕樹"/></span><span className="stg-tree-stars" aria-hidden="true">{[0,1,2,3,4,5].map(i => <i key={i} style={{ "--i": i } as CSSProperties}>✧</i>)}</span></span></button></div><span className="stg-ground" aria-hidden="true"/>{bounce > 0 && <div key={`spark-${bounce}`} className="stg-growth-burst" aria-hidden="true"><span className="stg-growth-ring"/>{[[-38,-42],[-18,-62],[14,-65],[40,-42],[-46,-9],[46,-8],[-25,12],[25,16]].map(([x,y], i) => <i key={i} style={{ "--burst-x": `${x}px`, "--burst-rise": `${y}px`, "--particle-delay": `${i * 17}ms` } as CSSProperties}>{i % 3 ? "·" : "✧"}</i>)}<b>+1</b></div>}</div>
       <div className="stg-play-controls">
         {state.loading ? <div className="stg-loading" role="status"><LoaderCircle size={17}/>正在找到你的小樹…</div> : showForm ? <form className="stg-name-form" onSubmit={saveName}><label htmlFor="solo-tree-name">{editing ? "替小樹換個暱稱" : "你想讓大家怎麼稱呼你？"}<small>{Array.from(name).length} / 16</small></label><div className="stg-name-input"><input id="solo-tree-name" value={name} onChange={event => setName(Array.from(event.target.value).slice(0,16).join(""))} autoComplete="nickname" placeholder="輸入 2～16 字暱稱" maxLength={32} disabled={naming}/>{editing && <button type="button" className="stg-cancel" onClick={() => setEditing(false)} disabled={naming}>取消</button>}</div>{(nameError || state.error) && <p className="stg-error" role="alert">{nameError || state.error}{state.error && !nameError && <button type="button" onClick={() => void session.current?.load()}>重試</button>}</p>}<button className="stg-primary" type="submit" disabled={naming || (!player && !!state.error) || Array.from(name.trim()).length < 2}>{naming ? <LoaderCircle className="stg-spinner" size={17}/> : <Leaf size={17}/>} {editing ? "儲存暱稱" : "種下我的耶誕樹"}<ArrowRight size={17}/></button><p className="stg-name-note">暱稱會出現在排行榜，隨時都可以修改。</p></form> : <>
           <div className={`stg-save-state ${state.retry ? "has-error" : ""}`} role="status">{state.retry ? <WifiOff size={12}/> : state.pending ? <LoaderCircle className="stg-spinner" size={12}/> : <Check size={12}/>}<span>{state.retry ? `${state.pending} 點星光等待重試` : state.pending ? `${state.pending} 點星光・${state.saving ? "儲存中" : "等待儲存"}` : "成長已儲存，下次回來繼續長大"}</span>{state.retry && <button onClick={() => void session.current?.flush()}>重試</button>}</div>
           {state.error && <p className="stg-error" role="alert">{state.error}</p>}
-          <div className="stg-grow-actions"><button className="stg-primary" onClick={grow}><Sparkles size={18}/>點一下，長大一點</button><button className={`stg-motion ${motion.status === "listening" ? "is-listening" : ""}`} aria-pressed={motion.status === "listening"} onClick={() => motion.status === "listening" ? motion.stop() : void motion.start()}><Smartphone size={19}/><span>{motion.status === "listening" ? "暫停搖搖" : motion.status === "paused" ? "繼續搖搖" : "開啟搖搖"}</span></button></div>
-          <p className="stg-motion-note">{(motion.status !== "idle" ? motion.message : state.notice || motion.message) || "輕輕搖動手機，或點按小樹，都能長大。"}</p>
+          <div className="stg-grow-actions"><button className={`stg-primary stg-shake-action ${motion.status === "listening" ? "is-listening" : ""}`} aria-pressed={motion.status === "listening"} onClick={() => motion.status === "listening" ? motion.stop() : void motion.start()}><span className="stg-phone-icon"><Smartphone size={21}/><i aria-hidden="true"/></span><span>{motionLabel}</span><span className="stg-shake-rhythm" aria-hidden="true"><i/><i/><i/><i/></span></button></div>
+          <p className="stg-motion-note">{(motion.status !== "idle" ? motion.message : state.notice || motion.message) || "輕輕左右搖動，讓星光慢慢長大。"}</p>
         </>}
       </div>
     </div>}
   </section>;
+}
+
+function AnimatedHeight({ height }: { height: number }) {
+  const [shown, setShown] = useState(height);
+  const current = useRef(height);
+  const element = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const from = current.current;
+    if (from === height) return;
+    let frame = 0;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches || !!element.current?.closest(".motion-paused");
+    const began = performance.now();
+    const animate = (now: number) => {
+      const progress = reduced ? 1 : Math.min(1, (now - began) / 650);
+      const value = Math.round(from + (height - from) * (1 - Math.pow(1 - progress, 3)));
+      current.current = value; setShown(value);
+      if (progress < 1) frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [height]);
+  return <strong ref={element} className="stg-height-value" aria-label={formatTreeHeight(height)}><span aria-hidden="true">{formatTreeHeight(shown)}</span></strong>;
 }
 
 function TreeRanking({ token, player, onPlayer, onPlay }: { token: string; player: TreePlayer | null; onPlayer: (player: TreePlayer | null) => void; onPlay: () => void }) {
