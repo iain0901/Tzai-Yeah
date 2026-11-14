@@ -36,6 +36,7 @@ export interface Participant {
   id: string;
   name: string;
   house: string;
+  householdNumber: number | null;
   groupId: string | null;
   cardId: string | null;
   checkedInAt: string | null;
@@ -78,8 +79,8 @@ export type AdminAction =
   | { action: "generateCards"; count?: number }
   | { action: "saveGroup"; id?: string; name: string; location?: string; note?: string; color?: string }
   | { action: "deleteGroup"; id: string }
-  | { action: "saveParticipant"; id?: string; name: string; house?: string; groupId?: string | null; cardId?: string | null }
-  | { action: "importParticipants"; rows: Array<{ name: string; house?: string; groupId?: string | null; cardSerial?: string }> }
+  | { action: "saveParticipant"; id?: string; name: string; house?: string; householdNumber?: number | null; groupId?: string | null; cardId?: string | null }
+  | { action: "importParticipants"; rows: Array<{ name: string; house?: string; householdNumber?: number | null; groupId?: string | null; cardSerial?: string }> }
   | { action: "publishGroups" }
   | { action: "setCardActive"; cardId: string; active: boolean }
   | { action: "checkIn"; participantId: string; checkedIn?: boolean }

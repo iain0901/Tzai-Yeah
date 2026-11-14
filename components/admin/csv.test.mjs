@@ -5,6 +5,17 @@ import { parseCSV, prepareImport } from "./csv.ts";
 const groups = [{ id: "g1", name: "暖心組" }];
 const cards = [{ serial: "001", active: true, participantId: null }, { serial: "002", active: true, participantId: null }];
 
+test("household number is imported as a positive integer", () => {
+  const result = prepareImport("姓名,家別,家內編號\n同名,第一家,1", [], []);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.rows[0].householdNumber, 1);
+});
+
+test("household numbers reject invalid, missing household and intra-house duplicates", () => {
+  const invalid = prepareImport("姓名,家別,家內編號\n甲,家,0\n乙,,1\n丙,家,1\n丁,家,1\n戊,另一家,1", [], []);
+  assert.equal(invalid.errors.length, 3);
+});
+
 test("CSV supports BOM, quoted comma, doubled quotes and CRLF", () => {
   assert.deepEqual(parseCSV('\uFEFF姓名,家別\r\n"林,同學","小""家"\r\n'), [["姓名", "家別"], ["林,同學", '小"家']]);
 });

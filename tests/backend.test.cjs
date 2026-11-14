@@ -68,6 +68,24 @@ function makeApp() {
   return { req, action, sqlite, setBeforeBatch: hook => { beforeBatch = hook; } };
 }
 
+test('household numbers are local, validated, atomic and preserve legacy edits', async () => {
+  const { req, action, sqlite } = makeApp();
+  assert.equal((await action({ action: 'saveParticipant', name: '同名', house: '甲', householdNumber: 1 })).status, 200);
+  assert.equal((await action({ action: 'saveParticipant', name: '同名', house: '乙', householdNumber: 1 })).status, 200);
+  assert.equal((await action({ action: 'saveParticipant', name: '同名', house: '甲', householdNumber: 1 })).status, 409);
+  assert.equal((await action({ action: 'saveParticipant', name: '甲', house: '甲', householdNumber: 0 })).status, 400);
+  assert.equal((await action({ action: 'saveParticipant', name: '甲', householdNumber: 1 })).status, 400);
+  let people = (await req('/api/admin')).data.participants;
+  const first = people.find(p => p.house === '甲');
+  assert.equal((await action({ action: 'saveParticipant', id: first.id, name: '改名', house: '甲' })).status, 200);
+  assert.equal((await req('/api/admin')).data.participants.find(p => p.id === first.id).householdNumber, 1);
+  assert.equal((await action({ action: 'importParticipants', rows: [{ name: '甲', house: '甲', householdNumber: 2 }, { name: '乙', house: '甲', householdNumber: 1 }] })).status, 409);
+  people = (await req('/api/admin')).data.participants;
+  assert.equal(people.length, 2);
+  assert.match((await req('/api/admin/export?kind=participants')).data, /家內編號/);
+  sqlite.close();
+});
+
 test('anonymous access, admin boundaries, CSRF and validation', async () => {
   const { req, action, sqlite } = makeApp();
   const publicData = await req('/api/event', { user: null });
