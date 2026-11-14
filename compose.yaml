@@ -1,0 +1,40 @@
+name: tzai-yeah
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tzai-yeah:local
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-http://localhost:3000}"
+      DATABASE_PATH: /app/data/tzai.sqlite
+      SESSION_SECRET_FILE: /app/secrets/session-secret
+      SESSION_SECRET: "${SESSION_SECRET:-}"
+      SECRETS_DIR: /app/secrets
+      INIT_CARD_COUNT: "${INIT_CARD_COUNT:-150}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-admin@tzai.local}"
+      ADMIN_NAME: "${ADMIN_NAME:-載耶管理員}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      ALLOW_REGISTRATION: "${ALLOW_REGISTRATION:-true}"
+      TRUST_PROXY: "${TRUST_PROXY:-false}"
+    volumes:
+      - data:/app/data
+      - secrets:/app/secrets
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  data:
+  secrets:

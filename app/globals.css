@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Serif+TC:wght@400;500;600;700&display=swap');
+/* Device fonts keep the self-hosted interface usable without a third-party font service. */
 
 :root{--forest:#123d32;--forest-deep:#0b2d25;--cream:#fff4dc;--paper:#fbf3e4;--red:#bc4a40;--gold:#eacb80;--ink:#1e4036;--muted:#6c7867;--line:#ded8c5;font-family:'DM Sans','Microsoft JhengHei',sans-serif;color:var(--ink);background:var(--paper);font-synthesis:none}
 *{box-sizing:border-box}body{margin:0}button,input,select,textarea{font:inherit}button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}button{cursor:pointer}button:disabled{cursor:wait;opacity:.65}a{color:inherit}img{display:block;max-width:100%;height:auto}button{color:inherit}h1,h2,h3,p,figure{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #c3873f;outline-offset:4px}html{scroll-behavior:smooth}::selection{background:#edd3a2;color:var(--forest)}

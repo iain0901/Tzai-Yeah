@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('typescript');
 
-// Real route source and SQLite, with a controlled server clock and D1-style atomic batches.
+// Real route source and SQLite, with a controlled server clock and SQLite atomic batches.
 function makeTree() {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec('PRAGMA foreign_keys=ON');
@@ -42,7 +42,19 @@ function makeTree() {
     if (cache.has(full)) return cache.get(full).exports;
     const module = { exports: {} }; cache.set(full, module);
     const compiled = ts.transpileModule(fs.readFileSync(full, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-    const localRequire = id => id === 'cloudflare:workers' ? { env: { DB, ADMIN_EMAILS: 'organizer@example.test' } } : id.startsWith('.') ? load(path.resolve(path.dirname(full), `${id}.ts`)) : require(id);
+    // Only the unit fixture accepts test headers. Production uses real signed session cookies.
+    const localRequire = id => {
+      if (id === './database') return { database: () => DB };
+      if (id === './auth') return {
+        publicOrigin: () => 'https://love.test',
+        getSessionUser: request => {
+          const user = request.headers.get('x-test-user-id');
+          return user ? { id: user, email: user === 'admin' ? 'organizer@example.test' : user + '@example.test', name: user, role: user === 'admin' ? 'admin' : 'member' } : null;
+        },
+      };
+      if (id.endsWith('.mjs')) return require(path.resolve(path.dirname(full), id));
+      return id.startsWith('.') ? load(path.resolve(path.dirname(full), id + '.ts')) : require(id);
+    };
     new Function('require', 'module', 'exports', 'Date', compiled)(localRequire, module, module.exports, ServerDate);
     return module.exports;
   }

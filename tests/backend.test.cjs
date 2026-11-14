@@ -5,8 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('typescript');
 
-// Exercise the actual route implementation against SQLite with D1's transactional batch contract.
-// This does not replace final deployed-Worker/mobile checks.
+// Exercise the actual route implementation against SQLite with the transactional batch contract.
+// This does not replace final production HTTP/mobile checks.
 function makeApp() {
   const sqlite = new DatabaseSync(':memory:');
   let beforeBatch = null;
@@ -35,7 +35,19 @@ function makeApp() {
     if (cache.has(full)) return cache.get(full).exports;
     const module = { exports: {} }; cache.set(full, module);
     const source = ts.transpileModule(fs.readFileSync(full, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-    const localRequire = id => id === 'cloudflare:workers' ? { env: { DB, ADMIN_EMAILS: 'organizer@example.test' } } : id.startsWith('.') ? load(path.resolve(path.dirname(full), `${id}.ts`)) : require(id);
+    // Only the unit fixture accepts test headers. Production uses real signed session cookies.
+    const localRequire = id => {
+      if (id === './database') return { database: () => DB };
+      if (id === './auth') return {
+        publicOrigin: () => 'https://love.test',
+        getSessionUser: request => {
+          const user = request.headers.get('x-test-user-id');
+          return user ? { id: user, email: user === 'admin' ? 'organizer@example.test' : user + '@example.test', name: user, role: user === 'admin' ? 'admin' : 'member' } : null;
+        },
+      };
+      if (id.endsWith('.mjs')) return require(path.resolve(path.dirname(full), id));
+      return id.startsWith('.') ? load(path.resolve(path.dirname(full), id + '.ts')) : require(id);
+    };
     new Function('require', 'module', 'exports', source)(localRequire, module, module.exports);
     return module.exports;
   }
@@ -43,8 +55,8 @@ function makeApp() {
   async function req(route, { method = 'GET', body, user = 'admin', origin = true } = {}) {
     const headers = {};
     if (user) {
-      headers['oai-authenticated-user-id'] = user;
-      headers['oai-authenticated-user-email'] = user === 'admin' ? 'organizer@example.test' : `${user}@example.test`;
+      headers['x-test-user-id'] = user;
+      headers['x-test-user-email'] = user === 'admin' ? 'organizer@example.test' : `${user}@example.test`;
     }
     if (method === 'POST') { headers['content-type'] = 'application/json'; if (origin) headers.origin = 'https://love.test'; }
     const response = await handleApi(new Request(`https://love.test${route}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }));

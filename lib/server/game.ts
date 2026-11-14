@@ -1,4 +1,5 @@
-import { env } from "cloudflare:workers";
+import { database } from "./database";
+import { clientAddress } from "./client-address.mjs";
 import { GAME_MEMBER_COLORS, GAME_MAX_MEMBERS, GAME_ROUND_SECONDS, GAME_TOTAL_BULBS } from "../game-contracts";
 import type { GameMemory, GameRoomSnapshot, GameStatus } from "../game-contracts";
 import { ApiFault, randomToken, sha256, textValue } from "./validation";
@@ -17,10 +18,6 @@ type StoredRoom = {
   expiresAt: number; completedAt: string | null; guestCounter: number;
 };
 
-function database(): D1Database {
-  if (!env.DB) throw new ApiFault(503, "遊戲暫時無法連線，請稍後再試。", "database_unavailable");
-  return env.DB;
-}
 function response(room: GameRoomSnapshot, session?: Session) {
   const headers: Record<string, string> = { "Cache-Control": "no-store, max-age=0", "Vary": "Cookie", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" };
   if (session?.cookie) headers["Set-Cookie"] = session.cookie;
@@ -45,7 +42,7 @@ function generateCode() {
 }
 async function sessionFor(request: Request, create = false): Promise<Session> {
   const raw = request.headers.get("cookie")?.split(";").map(s => s.trim()).find(s => s.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  const secure = new URL(process.env.PUBLIC_ORIGIN || request.url).protocol === "https:" ? "; Secure" : "";
   const cookieFor = (secret: string) => `${COOKIE}=${secret}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ROOM_TTL / 1000}${secure}`;
   if (raw && /^[a-f0-9]{64}$/.test(raw)) return { hash: await sha256(raw), cookie: create ? cookieFor(raw) : null };
   if (!create) throw new ApiFault(403, "請先輸入房間代碼，加入朋友的房間。", "join_required");
@@ -67,7 +64,7 @@ async function limit(scope: string, identity: string, maximum: number, windowMs:
   const row = await database().prepare("INSERT INTO settings(id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=json_set(settings.value,'$.count',json_extract(settings.value,'$.count')+1) RETURNING value").bind(key, value).first<{ value: string }>();
   if (!row || JSON.parse(row.value).count > maximum) throw new ApiFault(429, "操作有點快，請稍等一下再試。", "rate_limited");
 }
-function peer(request: Request) { return request.headers.get("cf-connecting-ip") || "local-development"; }
+function peer(request: Request) { return clientAddress(request); }
 async function readRoom(code: string) {
   const row = await database().prepare("SELECT value FROM settings WHERE id=?").bind(`game_room:${code}`).first<{ value: string }>();
   if (!row) throw new ApiFault(404, "找不到這個房間，請確認朋友給你的代碼。", "room_not_found");
@@ -108,7 +105,7 @@ async function compareAndSwap(previousRaw: string, room: StoredRoom): Promise<bo
   if (room.status === "won") {
     const cardIds = [...new Set(room.members.map(m => m.cardId).filter((id): id is string => !!id))];
     const wins = cardIds.map(cardId => ({ key: `game_win:${cardId}:${room.code}:${room.round}`, cardId, value: { roomCode: room.code, round: room.round, completedAt: room.completedAt } }));
-    // Both statements run in a single D1 transaction. The exact state match guards a failed CAS,
+    // Both statements run in a single SQLite transaction. The exact state match guards a failed CAS,
     // and each card/room/round key makes repeated final-bulb requests idempotent.
     statements.push(database().prepare("INSERT OR IGNORE INTO settings(id,value) SELECT json_extract(j.value,'$.key'),json_extract(j.value,'$.value') FROM json_each(?) j WHERE (SELECT value FROM settings WHERE id=?)=? AND EXISTS(SELECT 1 FROM cards WHERE id=json_extract(j.value,'$.cardId') AND active=1)").bind(JSON.stringify(wins), roomKey, nextRaw));
   }

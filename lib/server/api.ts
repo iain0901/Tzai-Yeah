@@ -1,4 +1,5 @@
-import { env } from "cloudflare:workers";
+import { database, type SqlDatabase, type SqlPreparedStatement } from "./database";
+import { getSessionUser, publicOrigin } from "./auth";
 import type { AdminData, Card, EventConfig, Group, Participant, Profile, PublicEventData, UserIdentity } from "../contracts";
 import { ApiFault, csvCell, DEFAULT_EVENT, EMPTY_PROFILE, idValue, parseProfile, randomToken, sha256, textValue, validateEvent } from "./validation";
 import { gameMemory, getGame, postGame } from "./game";
@@ -7,22 +8,14 @@ import { getTree, getTreeLeaderboard, postTree } from "./tree";
 type Row = Record<string, unknown>;
 type Publication = { version: number; publishedAt: string | null; assignments: Record<string, Group> };
 const NO_PUBLICATION: Publication = { version: 0, publishedAt: null, assignments: {} };
-const responseHeaders = { "Cache-Control": "no-store, max-age=0", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Vary": "Cookie, oai-authenticated-user-id" };
+const responseHeaders = { "Cache-Control": "no-store, max-age=0", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Vary": "Cookie" };
 
-function db(): D1Database {
-  if (!env.DB) throw new ApiFault(503, "資料庫尚未連線，請稍後重試。", "database_unavailable");
-  return env.DB;
+function db(): SqlDatabase {
+  return database();
 }
 function json(value: unknown, status = 200) { return Response.json(value, { status, headers: responseHeaders }); }
 function userFor(request: Request): UserIdentity | null {
-  const id = request.headers.get("oai-authenticated-user-id");
-  const email = request.headers.get("oai-authenticated-user-email");
-  if (!id || !email) return null;
-  let name = request.headers.get("oai-authenticated-user-full-name") || email;
-  if (request.headers.get("oai-authenticated-user-full-name-encoding") === "percent-encoded-utf-8") {
-    try { name = decodeURIComponent(name); } catch { name = email; }
-  }
-  return { id, email, name };
+  return getSessionUser(request);
 }
 function requireUser(request: Request) {
   const user = userFor(request);
@@ -31,14 +24,13 @@ function requireUser(request: Request) {
 }
 function requireAdmin(request: Request) {
   const user = requireUser(request);
-  const emails = (env.ADMIN_EMAILS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-  if (!emails.includes(user.email.toLowerCase())) throw new ApiFault(403, "這個帳號沒有管理權限。", "admin_required");
+  if (user.role !== "admin") throw new ApiFault(403, "這個帳號沒有管理權限。", "admin_required");
   return user;
 }
 function csrf(request: Request) {
   const origin = request.headers.get("origin");
-  if (!origin || origin !== new URL(request.url).origin || request.headers.get("sec-fetch-site") === "cross-site") throw new ApiFault(403, "請從本站重新開啟頁面後操作。", "invalid_origin");
-  if (!request.headers.get("content-type")?.startsWith("application/json")) throw new ApiFault(415, "請使用 JSON 格式送出。", "invalid_content_type");
+  if (!origin || origin !== publicOrigin() || request.headers.get("sec-fetch-site") === "cross-site") throw new ApiFault(403, "請從本站重新開啟頁面後操作。", "invalid_origin");
+  if (!/^application\/json(?:;|$)/i.test(request.headers.get("content-type") || "")) throw new ApiFault(415, "請使用 JSON 格式送出。", "invalid_content_type");
 }
 async function bodyFor(request: Request): Promise<Row> {
   if (Number(request.headers.get("content-length") || 0) > 350000) throw new ApiFault(413, "資料太多，請分批匯入。");
@@ -95,7 +87,7 @@ async function adminData(request: Request): Promise<AdminData> {
     db().prepare("SELECT * FROM groups ORDER BY name").all<Group>(),
     db().prepare("SELECT id,actor,action,detail,created_at AS createdAt FROM audit ORDER BY created_at DESC LIMIT 30").all<AdminData["audit"][number]>(),
   ]);
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin();
   const cards: Card[] = allCards.results.map(r => ({ id: String(r.id), serial: String(r.serial), token: String(r.token), url: `${origin}/t/${r.token}`, active: !!r.active, participantId: r.participant_id as string | null, createdAt: String(r.created_at) }));
   const participants: Participant[] = allParticipants.results.map(r => ({ id: String(r.id), name: String(r.name), house: String(r.house), groupId: r.group_id as string | null, cardId: r.card_id as string | null, checkedInAt: r.checked_in_at as string | null, claimed: !!r.owner_id, hasClaimCode: !!r.claim_hash }));
   return { event, cards, participants, groups: allGroups.results, user, audit: audit.results, stats: { cards: cards.length, participants: participants.length, bound: cards.filter(c => c.participantId).length, grouped: participants.filter(p => p.groupId).length, checkedIn: participants.filter(p => p.checkedInAt).length, published: Object.keys(publication.assignments).length } };
@@ -135,7 +127,7 @@ async function importParticipants(body: Row, user: UserIdentity) {
   const groupIds = new Set(groups.results.map(g => g.id));
   const cardMap = new Map(cards.results.map(c => [String(c.serial), c]));
   const usedCards = new Set<string>();
-  const statements: D1PreparedStatement[] = [];
+  const statements: SqlPreparedStatement[] = [];
   for (const [index, entry] of body.rows.entries()) {
     if (!entry || typeof entry !== "object") throw new ApiFault(400, `第 ${index + 1} 列資料格式不正確。`);
     const row = entry as Row;
@@ -170,7 +162,7 @@ async function adminAction(request: Request, body: Row) {
     if (!Number.isInteger(count) || Number(count) < 1 || Number(count) > 500) throw new ApiFault(400, "卡片總數請填寫 1～500。");
     const existing = await db().prepare("SELECT serial FROM cards").all<{ serial: string }>();
     const serials = new Set(existing.results.map(c => c.serial));
-    const statements: D1PreparedStatement[] = [];
+    const statements: SqlPreparedStatement[] = [];
     for (let i = 1; i <= Number(count); i++) {
       const serial = String(i).padStart(3, "0");
       if (!serials.has(serial)) statements.push(db().prepare("INSERT OR IGNORE INTO cards (id,serial,token,active,created_at) VALUES (?,?,?,1,?)").bind(crypto.randomUUID(), serial, randomToken(), new Date().toISOString()));
@@ -269,7 +261,7 @@ async function saveProfile(request: Request, body: Row) {
   if (!row.owner_id || row.owner_id !== user.id) throw new ApiFault(403, "請先使用工作人員提供的認領碼認領小卡。", "owner_required");
   const profile = parseProfile(body);
   // Prevent redirect loops back into this card or the same Site.
-  if (profile.url && new URL(profile.url).origin === new URL(request.url).origin) throw new ApiFault(400, "個人連結請填寫本站以外的網址。");
+  if (profile.url && new URL(profile.url).origin === publicOrigin()) throw new ApiFault(400, "個人連結請填寫本站以外的網址。");
   const result = await db().batch([db().prepare("UPDATE participants SET profile=? WHERE id=? AND owner_id=?").bind(JSON.stringify(profile), row.participant_id, user.id), auditStatement(user, "saveProfile", `participant=${row.participant_id}`, true)]);
   if (!result[0].meta.changes) throw new ApiFault(409, "小卡擁有者已變更，請重新登入或洽工作人員。", "ownership_changed");
   return { ok: true, message: "個人連結已儲存，活動結束後會顯示在小卡上。" };

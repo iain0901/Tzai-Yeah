@@ -51,7 +51,7 @@ export interface Card {
   participantId: string | null;
   createdAt: string;
 }
-export interface UserIdentity { id: string; email: string; name: string }
+export interface UserIdentity { id: string; email: string; name: string; role?: "admin" | "member" }
 export interface AuditEntry { id: string; actor: string; action: string; detail: string; createdAt: string }
 export interface AdminData {
   event: EventConfig;

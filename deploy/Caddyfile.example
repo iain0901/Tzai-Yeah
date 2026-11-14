@@ -1,0 +1,6 @@
+# Replace this with a domain whose DNS points to your server.
+# Caddy runs on the host; Compose binds the app to 127.0.0.1:3000.
+party.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3000
+}

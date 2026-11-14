@@ -1,4 +1,5 @@
-import { env } from "cloudflare:workers";
+import { database } from "./database";
+import { clientAddress } from "./client-address.mjs";
 import type { TreeLeaderboard, TreePlayer, TreeResponse } from "../tree-contracts";
 import { treeLevel } from "../tree-contracts";
 import { ApiFault, randomToken, sha256 } from "./validation";
@@ -17,10 +18,6 @@ type StoredTree = {
 type RankedRow = { value: string; rank: number };
 const RANKED = "WITH ranked AS (SELECT id AS storage_key,value,ROW_NUMBER() OVER (ORDER BY CAST(json_extract(value,'$.growth') AS INTEGER) DESC,json_extract(value,'$.createdAt') ASC,json_extract(value,'$.id') ASC) AS rank FROM settings WHERE id GLOB 'tree_player:*')";
 
-function database(): D1Database {
-  if (!env.DB) throw new ApiFault(503, "耶誕樹暫時無法連線，請稍後再試。", "database_unavailable");
-  return env.DB;
-}
 function reply(value: TreeResponse | TreeLeaderboard, identity?: Identity | null) {
   const headers: Record<string, string> = { "Cache-Control": "no-store, max-age=0", "Vary": "Cookie", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" };
   if (identity?.cookie) headers["Set-Cookie"] = identity.cookie;
@@ -38,7 +35,7 @@ async function identityFor(request: Request, token: unknown, createGuest = false
   const existing = raw && /^[a-f0-9]{64}$/.test(raw) ? raw : null;
   if (!existing && !createGuest) return null;
   const secret = existing || randomToken(32);
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  const secure = new URL(process.env.PUBLIC_ORIGIN || request.url).protocol === "https:" ? "; Secure" : "";
   return {
     key: `tree_player:guest:${await sha256(secret)}`,
     cookie: createGuest ? `${COOKIE}=${secret}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${YEAR_SECONDS}${secure}` : null,
@@ -91,7 +88,7 @@ export async function getTreeLeaderboard(request: Request, url: URL): Promise<Re
   if (!/^\d{1,6}$/.test(pageValue) || Number(pageValue) < 1) throw new ApiFault(400, "排行榜頁碼不正確。", "invalid_page");
   const page = Number(pageValue);
   const identity = await identityFor(request, url.searchParams.get("token"));
-  // The three reads share one D1 transaction, so entries, total and myRank use the same snapshot.
+  // The three reads share one SQLite transaction, so entries, total and myRank use the same snapshot.
   const results = await database().batch([
     database().prepare(`${RANKED} SELECT value,rank FROM ranked ORDER BY rank LIMIT 5 OFFSET ?`).bind((page - 1) * 5),
     database().prepare(`${RANKED} SELECT value,rank FROM ranked WHERE storage_key=?`).bind(identity?.key || ""),
@@ -115,7 +112,7 @@ export async function postTree(request: Request, body: Row): Promise<Response> {
   if (action === "register") {
     const existing = await rankedPlayer(identity);
     if (existing) return reply({ player: existing, serverNow: Date.now() }, identity);
-    await limit("register-ip", request.headers.get("cf-connecting-ip") || "local-development", 600, 3600000);
+    await limit("register-ip", clientAddress(request), 600, 3600000);
     const now = Date.now();
     const timestamp = new Date(now).toISOString();
     const tree: StoredTree = { id: randomToken(16), name, growth: 0, revision: 1, createdAt: timestamp, updatedAt: timestamp, credit: CAPACITY, creditAt: now, requests: [] };
