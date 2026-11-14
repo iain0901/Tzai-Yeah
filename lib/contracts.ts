@@ -42,6 +42,9 @@ export interface Participant {
   checkedInAt: string | null;
   claimed: boolean;
   hasClaimCode: boolean;
+  profile: Profile | null;
+  url: string | null;
+  linkActive: boolean;
 }
 export interface Card {
   id: string;
@@ -72,11 +75,12 @@ export interface MeData {
   bound: boolean;
   profile: Profile | null;
 }
-export interface ActionResult { ok: true; message: string; code?: string; count?: number }
+export interface ActionResult { ok: true; message: string; code?: string; count?: number; url?: string; participantId?: string; cardId?: string; created?: boolean }
 export interface ApiError { error: string; code: string }
 export type AdminAction =
   | { action: "saveEvent"; event: Partial<EventConfig> }
   | { action: "generateCards"; count?: number }
+  | { action: "ensureParticipantLink"; participantId: string }
   | { action: "saveGroup"; id?: string; name: string; location?: string; note?: string; color?: string }
   | { action: "deleteGroup"; id: string }
   | { action: "saveParticipant"; id?: string; name: string; house?: string; householdNumber?: number | null; groupId?: string | null; cardId?: string | null }

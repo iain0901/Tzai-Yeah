@@ -75,8 +75,16 @@ async function publicCardRow(token: string) {
   if (!row.active) throw new ApiFault(410, "這張小卡已停用，請洽工作人員協助。", "card_inactive");
   return row;
 }
+function storedProfile(value: unknown): Profile | null {
+  try {
+    const profile = JSON.parse(String(value));
+    if (!profile || typeof profile !== "object" || Array.isArray(profile) || typeof profile.displayName !== "string" || typeof profile.bio !== "string" || typeof profile.url !== "string" || !["page", "redirect"].includes(profile.mode)) return null;
+    parseProfile(profile);
+    return { displayName: profile.displayName, bio: profile.bio, url: profile.url, mode: profile.mode };
+  } catch { return null; }
+}
 function cardProfile(row: Row, includeSaved = true): Profile {
-  const profile = includeSaved && row.profile ? JSON.parse(String(row.profile)) as Profile : { ...EMPTY_PROFILE };
+  const profile = (includeSaved ? storedProfile(row.profile) : null) || { ...EMPTY_PROFILE };
   return { ...profile, displayName: profile.displayName.trim() || `#${row.serial}` };
 }
 function requireBoundCard(row: Row) {
@@ -95,14 +103,39 @@ async function adminData(request: Request): Promise<AdminData> {
   const [{ event, publication }, allCards, allParticipants, allGroups, audit] = await Promise.all([
     settingsData(),
     db().prepare("SELECT c.*,b.participant_id FROM cards c LEFT JOIN card_bindings b ON b.card_id=c.id ORDER BY CAST(c.serial AS INTEGER)").all<Row>(),
-    db().prepare("SELECT p.id,p.name,p.house,p.household_number,p.group_id,p.checked_in_at,p.owner_id,p.claim_hash,b.card_id FROM participants p LEFT JOIN card_bindings b ON b.participant_id=p.id ORDER BY p.created_at,p.name").all<Row>(),
+    db().prepare("SELECT p.id,p.name,p.house,p.household_number,p.group_id,p.checked_in_at,p.owner_id,p.claim_hash,p.profile,b.card_id,c.token AS card_token,c.active AS card_active FROM participants p LEFT JOIN card_bindings b ON b.participant_id=p.id LEFT JOIN cards c ON c.id=b.card_id ORDER BY p.created_at,p.name").all<Row>(),
     db().prepare("SELECT * FROM groups ORDER BY name").all<Group>(),
     db().prepare("SELECT id,actor,action,detail,created_at AS createdAt FROM audit ORDER BY created_at DESC LIMIT 30").all<AdminData["audit"][number]>(),
   ]);
   const origin = publicOrigin();
   const cards: Card[] = allCards.results.map(r => ({ id: String(r.id), serial: String(r.serial), token: String(r.token), url: `${origin}/t/${r.token}`, active: !!r.active, participantId: r.participant_id as string | null, createdAt: String(r.created_at) }));
-  const participants: Participant[] = allParticipants.results.map(r => ({ id: String(r.id), name: String(r.name), house: String(r.house), householdNumber: r.household_number as number | null, groupId: r.group_id as string | null, cardId: r.card_id as string | null, checkedInAt: r.checked_in_at as string | null, claimed: !!r.owner_id, hasClaimCode: !!r.claim_hash }));
+  const participants: Participant[] = allParticipants.results.map(r => {
+    return { id: String(r.id), name: String(r.name), house: String(r.house), householdNumber: r.household_number as number | null, groupId: r.group_id as string | null, cardId: r.card_id as string | null, checkedInAt: r.checked_in_at as string | null, claimed: !!r.owner_id, hasClaimCode: !!r.claim_hash, profile: storedProfile(r.profile), url: r.card_token ? `${origin}/t/${r.card_token}` : null, linkActive: !!r.card_active };
+  });
   return { event, cards, participants, groups: allGroups.results, user, audit: audit.results, stats: { cards: cards.length, participants: participants.length, bound: cards.filter(c => c.participantId).length, grouped: participants.filter(p => p.groupId).length, checkedIn: participants.filter(p => p.checkedInAt).length, published: Object.keys(publication.assignments).length } };
+}
+async function ensureParticipantLink(body: Row, user: UserIdentity) {
+  const participantId = idValue(body.participantId);
+  if (!participantId || !await db().prepare("SELECT id FROM participants WHERE id=?").bind(participantId).first()) throw new ApiFault(404, "找不到參加者。");
+  const readBoundCard = () => db().prepare("SELECT c.id,c.token,c.active FROM card_bindings b JOIN cards c ON c.id=b.card_id WHERE b.participant_id=?").bind(participantId).first<Row>();
+  const linkResult = (card: Row, created: boolean) => {
+    if (!card.active) throw new ApiFault(409, "這位參加者的連結已停用，請先在連結設定中確認。", "link_inactive");
+    return { ok: true as const, message: created ? "專屬連結已建立。" : "已取得原本的專屬連結。", url: `${publicOrigin()}/t/${card.token}`, participantId, cardId: String(card.id), created };
+  };
+  const existing = await readBoundCard();
+  if (existing) return linkResult(existing, false);
+
+  // Allocate a fresh link rather than reuse an unbound card that may already be printed or shared.
+  // Both guards run in one transaction, so a concurrent assignment wins without an orphan card.
+  const cardId = crypto.randomUUID();
+  const results = await db().batch([
+    db().prepare("INSERT INTO cards (id,serial,token,active,created_at) SELECT ?,printf('%03d',(SELECT COALESCE(MAX(CAST(serial AS INTEGER)),0)+1 FROM cards)),?,1,? WHERE EXISTS(SELECT 1 FROM participants WHERE id=?) AND NOT EXISTS(SELECT 1 FROM card_bindings WHERE participant_id=?)").bind(cardId, randomToken(), new Date().toISOString(), participantId, participantId),
+    db().prepare("INSERT INTO card_bindings (card_id,participant_id) SELECT id,? FROM cards WHERE id=? AND active=1 AND NOT EXISTS(SELECT 1 FROM card_bindings WHERE participant_id=?)").bind(participantId, cardId, participantId),
+    auditStatement(user, "ensureParticipantLink", `participant=${participantId};card=${cardId}`, true),
+  ]);
+  const bound = await readBoundCard();
+  if (!bound) throw new ApiFault(409, "參加者資料剛剛有變更，請重新整理後再試。", "conflict");
+  return linkResult(bound, results[1].meta.changes > 0);
 }
 async function saveParticipant(body: Row, user: UserIdentity) {
   const suppliedId = idValue(body.id);
@@ -115,7 +148,7 @@ async function saveParticipant(body: Row, user: UserIdentity) {
   const groupId = "groupId" in body ? idValue(body.groupId) : (current?.group_id as string || null);
   const cardId = "cardId" in body ? idValue(body.cardId) : (current?.card_id as string || null);
   if (groupId && !await db().prepare("SELECT id FROM groups WHERE id=?").bind(groupId).first()) throw new ApiFault(400, "指定的組別不存在。");
-  if (cardId) {
+  if (cardId && ("cardId" in body)) {
     const card = await db().prepare("SELECT active FROM cards WHERE id=?").bind(cardId).first<{ active: number }>();
     if (!card || !card.active) throw new ApiFault(400, "請選擇有效的小卡。");
   }
@@ -165,6 +198,7 @@ async function adminAction(request: Request, body: Row) {
   const action = textValue(body.action, "操作", 40, true);
   if (action === "saveParticipant") return saveParticipant(body, user);
   if (action === "importParticipants") return importParticipants(body, user);
+  if (action === "ensureParticipantLink") return ensureParticipantLink(body, user);
   if (action === "saveEvent") {
     const { event } = await settingsData();
     const next = validateEvent(event, body.event);
@@ -293,7 +327,7 @@ async function exportCsv(request: Request, url: URL) {
   const { publication } = await settingsData();
   let rows: unknown[][];
   if (kind === "cards") rows = [["卡套流水號", "NFC網址", "啟用", "姓名", "家別", "家內編號"], ...data.cards.map(c => [c.serial, c.url, c.active ? "是" : "否", c.participantId ? people.get(c.participantId)?.name : "", c.participantId ? people.get(c.participantId)?.house : "", c.participantId ? people.get(c.participantId)?.householdNumber : ""])];
-  else rows = [["姓名", "家別", "家內編號", "卡套流水號", kind === "offline" ? "已發布組別" : "草稿組別", "集合地點", "報到時間"], ...data.participants.map(p => { const g = kind === "offline" ? publication.assignments[p.id] : groups.get(p.groupId || ""); return [p.name, p.house, p.householdNumber, cards.get(p.cardId || "")?.serial || "", g?.name || "尚未分組", g?.location || "", p.checkedInAt || ""]; })];
+  else rows = [["姓名", "家別", "家內編號", "系統編號", kind === "offline" ? "已發布組別" : "草稿組別", "集合地點"], ...data.participants.map(p => { const g = kind === "offline" ? publication.assignments[p.id] : groups.get(p.groupId || ""); return [p.name, p.house, p.householdNumber, cards.get(p.cardId || "")?.serial || "", g?.name || "尚未分組", g?.location || ""]; })];
   const csv = "\uFEFF" + rows.map(r => r.map(csvCell).join(",")).join("\r\n");
   return new Response(csv, { headers: { ...responseHeaders, "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="tzai-${kind}.csv"` } });
 }
