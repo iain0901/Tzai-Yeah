@@ -37,6 +37,7 @@ yarn-error.log*
 /secrets/
 /backups/
 /imports/
+/private-instance/
 *.sqlite
 *.sqlite-*
 *.db

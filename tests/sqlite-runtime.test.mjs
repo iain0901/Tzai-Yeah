@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, statSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, statSync, chmodSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -154,11 +155,41 @@ test("online backup includes WAL data and offline restore preserves the old data
   await assert.rejects(restoreDatabase(output, { filename: f.filename, confirmStopped: true }), /already exists/);
   const restored = await restoreDatabase(output, { filename: f.filename, confirmStopped: true, force: true });
   assert.ok(existsSync(restored.previousBackup));
+  const safetyCheck = new DatabaseSync(restored.previousBackup, { readOnly: true });
+  try { assert.equal(safetyCheck.prepare("PRAGMA journal_mode").get().journal_mode, "delete"); }
+  finally { safetyCheck.close(); }
   const previous = f.open(restored.previousBackup);
   assert.equal(await previous.prepare("SELECT value FROM settings WHERE id='event'").first("value"), "newer");
   const current = f.open();
   assert.equal(await current.prepare("SELECT value FROM settings WHERE id='event'").first("value"), "original");
   assert.equal(existsSync(`${f.filename}.restore.lock`), false);
+});
+
+test("backup is one DELETE-mode file and can be read and restored without creating sidecars", async t => {
+  const f = fixture(t), db = f.open();
+  await db.prepare("INSERT INTO settings VALUES ('event','committed-in-WAL')").run();
+  const directory = path.join(f.directory, "portable-backup");
+  const output = path.join(directory, "snapshot.sqlite");
+  await backupDatabase(output, { database: db });
+  assert.deepEqual(readdirSync(directory), ["snapshot.sqlite"], "backup must leave no UUID .tmp-wal/.tmp-shm files");
+  if (process.platform !== "win32") { chmodSync(output, 0o400); chmodSync(directory, 0o500); }
+  try {
+    const check = new DatabaseSync(output, { readOnly: true });
+    try {
+      assert.equal(check.prepare("PRAGMA journal_mode").get().journal_mode, "delete");
+      assert.equal(check.prepare("SELECT value FROM settings WHERE id='event'").get().value, "committed-in-WAL");
+      assert.equal(check.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+    } finally { check.close(); }
+    const restored = path.join(f.directory, "restored-from-readonly.sqlite");
+    await restoreDatabase(output, { filename: restored, migrationsDirectory, confirmStopped: true });
+    assert.equal(await f.open(restored).prepare("SELECT value FROM settings WHERE id='event'").first("value"), "committed-in-WAL");
+    assert.deepEqual(readdirSync(directory), ["snapshot.sqlite"], "read-only opening and restore must not create sidecars beside the backup");
+  } finally {
+    if (process.platform !== "win32") { chmodSync(directory, 0o700); chmodSync(output, 0o600); }
+  }
+  // Replacing a backup must also leave only the final snapshot.
+  await backupDatabase(output, { database: db, force: true });
+  assert.deepEqual(readdirSync(directory), ["snapshot.sqlite"]);
 });
 
 test("restore rejects corrupt or unrelated backups without replacing data", async t => {
