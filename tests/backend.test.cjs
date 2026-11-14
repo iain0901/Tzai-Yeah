@@ -69,7 +69,7 @@ function makeApp() {
 }
 
 test('household numbers are local, validated, atomic and preserve legacy edits', async () => {
-  const { req, action, sqlite } = makeApp();
+  const { req, action, sqlite, setBeforeBatch } = makeApp();
   assert.equal((await action({ action: 'saveParticipant', name: '同名', house: '甲', householdNumber: 1 })).status, 200);
   assert.equal((await action({ action: 'saveParticipant', name: '同名', house: '乙', householdNumber: 1 })).status, 200);
   assert.equal((await action({ action: 'saveParticipant', name: '同名', house: '甲', householdNumber: 1 })).status, 409);
@@ -84,6 +84,17 @@ test('household numbers are local, validated, atomic and preserve legacy edits',
   const afterInline = (await req('/api/admin')).data.participants.find(p => p.id === first.id);
   assert.equal(afterInline.householdNumber, 1);
   assert.equal(afterInline.groupId, 'house-inline');
+  assert.equal((await action({ action: 'saveParticipant', id: first.id, name: '只改姓名' })).status, 200);
+  const afterName = (await req('/api/admin')).data.participants.find(p => p.id === first.id);
+  assert.equal(afterName.house, '甲');
+  assert.equal(afterName.householdNumber, 1);
+  assert.equal(afterName.groupId, 'house-inline');
+  setBeforeBatch(() => sqlite.prepare('UPDATE participants SET house=?,household_number=? WHERE id=?').run('並行更新家別', 7, first.id));
+  assert.equal((await action({ action: 'saveParticipant', id: first.id, name: '再改姓名', groupId: 'house-inline' })).status, 200);
+  const afterConcurrent = (await req('/api/admin')).data.participants.find(p => p.id === first.id);
+  assert.equal(afterConcurrent.house, '並行更新家別');
+  assert.equal(afterConcurrent.householdNumber, 7);
+  assert.equal((await action({ action: 'saveParticipant', id: first.id, name: '恢復測試家別', house: '甲', householdNumber: 1 })).status, 200);
   assert.equal((await action({ action: 'importParticipants', rows: [{ name: '甲', house: '甲', householdNumber: 2 }, { name: '乙', house: '甲', householdNumber: 1 }] })).status, 409);
   people = (await req('/api/admin')).data.participants;
   assert.equal(people.length, 2);

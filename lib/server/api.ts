@@ -119,7 +119,7 @@ async function ensureParticipantLink(body: Row, user: UserIdentity) {
   if (!participantId || !await db().prepare("SELECT id FROM participants WHERE id=?").bind(participantId).first()) throw new ApiFault(404, "找不到參加者。");
   const readBoundCard = () => db().prepare("SELECT c.id,c.token,c.active FROM card_bindings b JOIN cards c ON c.id=b.card_id WHERE b.participant_id=?").bind(participantId).first<Row>();
   const linkResult = (card: Row, created: boolean) => {
-    if (!card.active) throw new ApiFault(409, "這位參加者的連結已停用，請先在連結設定中確認。", "link_inactive");
+    if (!card.active) throw new ApiFault(409, "這位參加者的專屬連結已停用。", "link_inactive");
     return { ok: true as const, message: created ? "專屬連結已建立。" : "已取得原本的專屬連結。", url: `${publicOrigin()}/t/${card.token}`, participantId, cardId: String(card.id), created };
   };
   const existing = await readBoundCard();
@@ -141,9 +141,9 @@ async function saveParticipant(body: Row, user: UserIdentity) {
   const suppliedId = idValue(body.id);
   const id = suppliedId || crypto.randomUUID();
   const name = textValue(body.name, "姓名", 80, true);
-  const house = textValue(body.house, "家別", 80);
-  const current = suppliedId ? await db().prepare("SELECT p.id,p.household_number,p.group_id,b.card_id FROM participants p LEFT JOIN card_bindings b ON b.participant_id=p.id WHERE p.id=?").bind(id).first<Row>() : null;
+  const current = suppliedId ? await db().prepare("SELECT p.id,p.house,p.household_number,p.group_id,b.card_id FROM participants p LEFT JOIN card_bindings b ON b.participant_id=p.id WHERE p.id=?").bind(id).first<Row>() : null;
   if (suppliedId && !current) throw new ApiFault(404, "找不到參加者。");
+  const house = "house" in body ? textValue(body.house, "家別", 80) : String(current?.house || "");
   const householdNumber = householdNumberValue("householdNumber" in body ? body.householdNumber : current?.household_number, house);
   const groupId = "groupId" in body ? idValue(body.groupId) : (current?.group_id as string || null);
   const cardId = "cardId" in body ? idValue(body.cardId) : (current?.card_id as string || null);
@@ -153,7 +153,7 @@ async function saveParticipant(body: Row, user: UserIdentity) {
     if (!card || !card.active) throw new ApiFault(400, "請選擇有效的小卡。");
   }
   const statements = [suppliedId
-    ? db().prepare("UPDATE participants SET name=?,house=?,household_number=?,group_id=? WHERE id=?").bind(name, house, householdNumber, groupId, id)
+    ? db().prepare("UPDATE participants SET name=?,house=CASE WHEN ?=1 THEN ? ELSE house END,household_number=CASE WHEN ?=1 THEN ? ELSE household_number END,group_id=? WHERE id=?").bind(name, "house" in body ? 1 : 0, house, "householdNumber" in body ? 1 : 0, householdNumber, groupId, id)
     : db().prepare("INSERT INTO participants (id,name,house,household_number,group_id,created_at) VALUES (?,?,?,?,?,?)").bind(id, name, house, householdNumber, groupId, new Date().toISOString())];
   if (current?.card_id !== cardId) {
     if (current?.card_id) statements.push(db().prepare("UPDATE cards SET active=0 WHERE id=?").bind(current.card_id));
