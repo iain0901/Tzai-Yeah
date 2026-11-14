@@ -120,16 +120,26 @@ function EventApp({ token, demo }: { token: string; demo?: EventPhase }) {
 function Invitation({ event, animate, onInfo }: { event: EventConfig; animate: boolean; onInfo: () => void }) {
   const [step, setStep] = useState(0);
   const [auto, setAuto] = useState(true);
+  const [showInfo, setShowInfo] = useState(false);
   const scenes = [{ title: event.theme, detail: "一片小小的拼圖，正在等你。", image: "/assets/heart.webp" }, { title: "在相遇裡，\n拼出愛的模樣。", detail: "和熟悉的朋友，也和還不認識的你。", image: "/assets/gingerbread-wave.webp" }, { title: `${event.date.slice(5).replace("-", ".")}，我們見。`, detail: `${event.doors} 入場 · ${event.start}—${event.end}\n${event.venue}`, image: "/assets/christmas-gift.webp" }];
   const lastStep = scenes.length - 1;
+  const isLastScene = step === lastStep;
   useEffect(() => {
     if (!animate || !auto || step >= lastStep) return;
     const timer = setTimeout(() => setStep(current => Math.min(current + 1, lastStep)), 3000);
     return () => clearTimeout(timer);
   }, [step, auto, animate, lastStep]);
 
+  useEffect(() => {
+    if (!isLastScene) return;
+    // Let the final scene enter before the same tap area can navigate away.
+    const timer = setTimeout(() => setShowInfo(true), 700);
+    return () => clearTimeout(timer);
+  }, [isLastScene]);
+
   function selectStep(next: number) {
     setAuto(false);
+    if (next !== step) setShowInfo(false);
     setStep(next);
   }
 
@@ -147,11 +157,11 @@ function Invitation({ event, animate, onInfo }: { event: EventConfig; animate: b
           <button type="button" key={i} aria-label={`邀請第 ${i + 1} 幕`} aria-current={step === i ? "step" : undefined} onClick={() => selectStep(i)}><span/></button>
         ))}
       </div>
-      {step === lastStep ? (
-        <button type="button" key="event-info" className="app-button cream" onClick={onInfo}>查看活動資訊<ArrowRight size={18}/></button>
-      ) : (
-        <button type="button" key="next-scene" className="app-button cream" onClick={() => selectStep(step + 1)}>下一幕<ChevronRight size={18}/></button>
-      )}
+      <div className="app-invitation-action">
+        {isLastScene
+          ? showInfo && <button type="button" className="app-button cream" onClick={onInfo}>查看活動資訊<ArrowRight size={18}/></button>
+          : <button type="button" className="app-button cream" onClick={() => selectStep(step + 1)}>下一幕<ChevronRight size={18}/></button>}
+      </div>
     </div>
   );
 }

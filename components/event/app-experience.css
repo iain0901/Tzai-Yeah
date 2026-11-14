@@ -90,3 +90,8 @@ body:has(.love-app){background:#082a23 radial-gradient(ellipse at 50% 20%,#21544
 @media(max-height:620px){.app-dock{--dock-side:10px;--dock-gap:5px}.app-dock-cursor{top:5px;bottom:calc(5px + env(safe-area-inset-bottom,0px));border-radius:14px}.app-live-home>.app-text{margin-top:7px;min-height:34px}}
 @media(prefers-reduced-motion:reduce){.app-entry-screen>svg,.app-connecting>svg,.app-phase-notice,.event-modal.app-dialog,.event-modal.app-dialog::backdrop{animation:none!important}.app-dock-cursor,.app-button:before{transition:none!important}}
 .motion-paused .app-dialog::backdrop{animation:none!important;transition:none!important}
+
+.app-invitation-action {
+  display: grid;
+  min-height: 52px;
+}
