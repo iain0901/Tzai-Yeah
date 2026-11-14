@@ -109,20 +109,51 @@ function EventApp({ token, demo }: { token: string; demo?: EventPhase }) {
       </main></SceneTransition>
     </div>
     <nav className="app-dock" aria-label="主要導覽" style={{ "--dock-index": ["home", "info", "game", "pass"].indexOf(screen) } as CSSProperties}><span className="app-dock-cursor" aria-hidden="true"/>{([{ id: "home", label: event.phase === "after" ? "回憶" : event.phase === "live" ? "分組" : "邀請", Icon: event.phase === "after" ? Heart : event.phase === "live" ? Puzzle : Mail }, { id: "info", label: "活動", Icon: CalendarDays }, { id: "game", label: "搖樹", Icon: Trees }, { id: "pass", label: "小卡", Icon: Ticket }] as const).map(({ id, label, Icon }) => <button key={id} aria-current={screen === id ? "page" : undefined} onClick={() => go(id)} className={screen === id ? "is-active" : ""}><Icon size={26} strokeWidth={1.7}/><span>{label}</span><i aria-hidden="true"/></button>)}</nav>
-    {menu && <Modal title="小世界選單" onClose={closeMenu} className="app-dialog app-menu"><span className="app-eyebrow">MAKE YOURSELF AT HOME</span><h2>待在這裡，玩一下。</h2><nav><button onClick={() => { closeMenu(); openIntro(); }}><Mail/>重播邀請動畫<ChevronRight/></button>{videoId && <button onClick={() => { closeMenu(); setVideo(true); }}><Play/>觀看直式預告<ChevronRight/></button>}<button onClick={music.toggle}><Music2/>聖誕背景音樂<span>{music.enabled ? "ON" : "OFF"}</span></button><button onClick={() => setMotion(v => !v)}>{motion ? <Pause/> : <Play/>}{motion ? "暫停畫面動態" : "恢復畫面動態"}<span>{motion ? "ON" : "OFF"}</span></button><button onClick={() => setSound(v => !v)}>{sound ? <Volume2/> : <VolumeX/>}點按音效<span>{sound ? "ON" : "OFF"}</span></button><a href="/admin">工作人員入口<ArrowUpRight size={18}/></a></nav><p>聖誕音樂盒 · We Wish You a Merry Christmas</p></Modal>}
+    {menu && <Modal title="小世界選單" onClose={closeMenu} className="app-dialog app-menu"><span className="app-eyebrow">MAKE YOURSELF AT HOME</span><h2>待在這裡，玩一下。</h2><nav><button onClick={() => { closeMenu(); openIntro(); }}><Mail/>重播邀請動畫<ChevronRight/></button>{videoId && <button onClick={() => { closeMenu(); setVideo(true); }}><Play/>觀看劇情預告<ChevronRight/></button>}<button onClick={music.toggle}><Music2/>聖誕背景音樂<span>{music.enabled ? "ON" : "OFF"}</span></button><button onClick={() => setMotion(v => !v)}>{motion ? <Pause/> : <Play/>}{motion ? "暫停畫面動態" : "恢復畫面動態"}<span>{motion ? "ON" : "OFF"}</span></button><button onClick={() => setSound(v => !v)}>{sound ? <Volume2/> : <VolumeX/>}點按音效<span>{sound ? "ON" : "OFF"}</span></button><a href="/admin">工作人員入口<ArrowUpRight size={18}/></a></nav><p>聖誕音樂盒 · We Wish You a Merry Christmas</p></Modal>}
     {intro && <Modal title="載耶聖誕邀請" onClose={closeIntro} className="app-dialog app-invitation"><Invitation event={event} animate={motion} onInfo={() => { closeIntro(); go("info"); }}/></Modal>}
-    {video && videoId && <Modal title="載耶直式劇情預告" onClose={closeVideo} className="app-dialog app-video"><h2>What is Love?</h2><div className="app-vertical-video"><iframe title="載耶直式劇情預告" src={`https://www.youtube-nocookie.com/embed/${videoId}?playsinline=1&rel=0`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen referrerPolicy="strict-origin-when-cross-origin"/></div><a className="app-text" href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" rel="noopener noreferrer">在 YouTube 開啟<ArrowUpRight size={16}/></a></Modal>}
+    {video && videoId && <Modal title="載耶劇情預告" onClose={closeVideo} className="app-dialog app-video"><h2>What is Love?</h2><div className="app-trailer-frame"><iframe title="載耶劇情預告" src={`https://www.youtube-nocookie.com/embed/${videoId}?playsinline=1&rel=0`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen referrerPolicy="strict-origin-when-cross-origin"/></div><a className="app-text" href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" rel="noopener noreferrer">在 YouTube 開啟<ArrowUpRight size={16}/></a></Modal>}
     {reading && <Modal title={reading.title} onClose={closeReading} className="app-dialog app-reader"><TextBook reading={reading}/></Modal>}
     {edit && token && <Modal title="管理我的載耶小卡" onClose={closeEdit} className="app-dialog app-profile-dialog"><ProfileEditor token={token} onSaved={reload}/></Modal>}
   </div>;
 }
 
 function Invitation({ event, animate, onInfo }: { event: EventConfig; animate: boolean; onInfo: () => void }) {
-  const [step, setStep] = useState(0); const [auto, setAuto] = useState(true);
-  useEffect(() => { if (!animate || !auto || step >= 2) return; const timer = setTimeout(() => setStep(s => s + 1), 3000); return () => clearTimeout(timer); }, [step, auto, animate]);
+  const [step, setStep] = useState(0);
+  const [auto, setAuto] = useState(true);
   const scenes = [{ title: event.theme, detail: "一片小小的拼圖，正在等你。", image: "/assets/heart.webp" }, { title: "在相遇裡，\n拼出愛的模樣。", detail: "和熟悉的朋友，也和還不認識的你。", image: "/assets/gingerbread-wave.webp" }, { title: `${event.date.slice(5).replace("-", ".")}，我們見。`, detail: `${event.doors} 入場 · ${event.start}—${event.end}\n${event.venue}`, image: "/assets/christmas-gift.webp" }];
+  const lastStep = scenes.length - 1;
+  useEffect(() => {
+    if (!animate || !auto || step >= lastStep) return;
+    const timer = setTimeout(() => setStep(current => Math.min(current + 1, lastStep)), 3000);
+    return () => clearTimeout(timer);
+  }, [step, auto, animate, lastStep]);
+
+  function selectStep(next: number) {
+    setAuto(false);
+    setStep(next);
+  }
+
   const scene = scenes[step];
-  return <div className="app-invitation-content"><span className="app-eyebrow">A LITTLE INVITATION FOR YOU</span><div className="app-story-scene" key={step}><img src={scene.image} alt=""/><h2>{scene.title}</h2><p>{scene.detail}</p></div><div className="app-story-dots">{scenes.map((_, i) => <button aria-label={`邀請第 ${i + 1} 幕`} aria-current={step === i ? "step" : undefined} onClick={() => { setAuto(false); setStep(i); }} key={i}><span/></button>)}</div><button className="app-button cream" onClick={onInfo}>查看活動資訊<ArrowRight size={18}/></button>{step < 2 && <button className="app-text" onClick={() => { setAuto(false); setStep(step + 1); }}>下一幕<ChevronRight size={15}/></button>}</div>;
+  return (
+    <div className="app-invitation-content">
+      <span className="app-eyebrow">A LITTLE INVITATION FOR YOU</span>
+      <div className="app-story-scene" key={step}>
+        <img src={scene.image} alt=""/>
+        <h2>{scene.title}</h2>
+        <p>{scene.detail}</p>
+      </div>
+      <div className="app-story-dots">
+        {scenes.map((_, i) => (
+          <button type="button" key={i} aria-label={`邀請第 ${i + 1} 幕`} aria-current={step === i ? "step" : undefined} onClick={() => selectStep(i)}><span/></button>
+        ))}
+      </div>
+      {step === lastStep ? (
+        <button type="button" key="event-info" className="app-button cream" onClick={onInfo}>查看活動資訊<ArrowRight size={18}/></button>
+      ) : (
+        <button type="button" key="next-scene" className="app-button cream" onClick={() => selectStep(step + 1)}>下一幕<ChevronRight size={18}/></button>
+      )}
+    </div>
+  );
 }
 function TextBook({ reading }: { reading: Reading }) {
   const [page, setPage] = useState(0); const chars = Array.from(reading.text); const pages: string[] = [];
