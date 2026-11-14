@@ -110,18 +110,54 @@ try {
   assert.equal(status(await guest.request(`/api/event?token=${card.token}`), 200, 'Card live event').card.group.name, '暖光組');
   data = status(await admin.request('/api/admin'), 200, 'Bound card data');
   const participant = data.participants[0];
-  assert.equal(status(await member.request(`/api/me?token=${card.token}`), 200, 'Member ownership before claim').isOwner, false);
-  const claim = await action({ action: 'issueClaimCode', participantId: participant.id });
-  status(await guest.request('/api/claim', { token: card.token, code: claim.code }), 401, 'Claim requires member login');
-  status(await member.request('/api/claim', { token: card.token, code: claim.code }), 200, 'Private code claims card');
+  const otherCard = data.cards[1], unboundCard = data.cards[2];
+  await action({ action: 'saveParticipant', name: 'HTTP 另一位同學', cardId: otherCard.id, groupId: 'http-warm-team' });
+  const otherParticipant = status(await admin.request('/api/admin'), 200, 'Second bound card').participants.find(p => p.cardId === otherCard.id);
+  const initialMe = status(await guest.request(`/api/me?token=${card.token}`), 200, 'Card link opens profile anonymously');
+  assert.equal(initialMe.user, null); assert.equal(initialMe.isOwner, false); assert.equal(initialMe.canEdit, true);
+  assert.equal(initialMe.serial, card.serial); assert.equal(initialMe.profile.displayName, `#${card.serial}`);
   const profile = { token: card.token, displayName: '暖暖的小卡', bio: '把冬天的回憶留起來', url: 'https://example.org/me', mode: 'page' };
-  status(await member.request('/api/profile', profile), 200, 'Owner saves profile');
-  status(await stranger.request('/api/auth/register', { email: 'stranger@example.test', name: '其他會員', password }), 200, 'Second member');
-  status(await stranger.request('/api/profile', { ...profile, displayName: '錯誤的人' }), 403, 'Other member cannot change profile');
-  status(await member.request('/api/profile', { ...profile, url: base }), 400, 'Self redirect is rejected');
+  status(await guest.request('/api/profile', { ...profile, participantId: otherParticipant.id, owner_id: 'not-authorized', name: '不應更動正式姓名' }), 200, 'Anonymous card holder saves only bound profile');
+  const secondClient = status(await stranger.request(`/api/me?token=${card.token}`), 200, 'Same card link works in another client');
+  assert.equal(secondClient.profile.displayName, profile.displayName);
+  status(await stranger.request('/api/profile', { ...profile, displayName: '第二台裝置的名字' }), 200, 'Second client edits through same card token');
+  assert.equal(status(await guest.request(`/api/me?token=${card.token}`), 200, 'Original client sees edit').profile.displayName, '第二台裝置的名字');
+  const untouched = status(await guest.request(`/api/me?token=${otherCard.token}`), 200, 'Other card stays separate');
+  assert.equal(untouched.profile.displayName, `#${otherCard.serial}`); assert.equal(untouched.profile.bio, '');
+  status(await guest.request('/api/profile', { ...profile, displayName: '  ' }), 200, 'Name can be left empty');
+  assert.equal(status(await guest.request(`/api/me?token=${card.token}`), 200, 'Default name is card serial').profile.displayName, `#${card.serial}`);
+  status(await guest.request('/api/profile', profile), 200, 'Restore custom profile');
+  status(await guest.request('/api/me'), 400, 'Profile read needs card token');
+  status(await guest.request('/api/profile', { ...profile, token: undefined }), 400, 'Profile save needs card token');
+  for (const invalidToken of ['invalid', '0'.repeat(48)]) {
+    status(await guest.request(`/api/me?token=${invalidToken}`), 404, 'Unknown card cannot read profile');
+    status(await guest.request('/api/profile', { ...profile, token: invalidToken }), 404, 'Unknown card cannot save profile');
+  }
+  status(await guest.request(`/api/me?token=${unboundCard.token}`), 409, 'Unbound card cannot edit profile');
+  status(await guest.request('/api/profile', { ...profile, token: unboundCard.token }), 409, 'Unbound card save rejected');
+  await action({ action: 'setCardActive', cardId: card.id, active: false });
+  status(await guest.request(`/api/me?token=${card.token}`), 410, 'Disabled card read rejected');
+  status(await guest.request('/api/profile', profile), 410, 'Disabled card save rejected');
+  await action({ action: 'setCardActive', cardId: card.id, active: true });
+  status(await guest.request('/api/profile', profile, { origin: '' }), 403, 'Profile save requires origin');
+  status(await guest.request('/api/profile', profile, { origin: 'https://evil.test' }), 403, 'Cross-origin card write rejected');
+  status(await guest.request('/api/profile', profile, { 'sec-fetch-site': 'cross-site' }), 403, 'Cross-site card write rejected');
+  status(await guest.request('/api/profile', profile, { 'content-type': 'text/plain' }), 415, 'Profile save requires JSON');
+  status(await guest.request('/api/profile', { ...profile, url: base }), 400, 'Self link is rejected');
+  status(await guest.request('/api/profile', { ...profile, url: 'javascript:alert(1)' }), 400, 'Unsafe link is rejected');
+  status(await guest.request(`/api/admin?token=${card.token}`), 401, 'Card token does not grant admin access');
+  status(await guest.request(`/api/admin/export?token=${card.token}`), 401, 'Card token does not grant export access');
+  status(await guest.request('/api/admin/action', { action: 'generateCards', token: card.token }), 401, 'Card token does not grant admin mutations');
+  // Existing claims and member accounts stay compatible; no front-end flow needs them.
+  const claim = await action({ action: 'issueClaimCode', participantId: participant.id });
+  status(await guest.request('/api/claim', { token: card.token, code: claim.code }), 401, 'Legacy claim still requires login');
+  status(await member.request('/api/claim', { token: card.token, code: claim.code }), 200, 'Legacy private claim remains available');
+  assert.equal(status(await member.request(`/api/me?token=${card.token}`), 200, 'Legacy owner metadata retained').isOwner, true);
+  status(await stranger.request('/api/profile', profile), 200, 'Card capability remains valid after legacy claim');
   await action({ action: 'saveEvent', event: { phase: 'after' } });
   assert.equal(status(await guest.request(`/api/event?token=${card.token}`), 200, 'After-event profile').card.profile.displayName, profile.displayName);
-  passed('Unique NFC URLs, binding, published groups, private claim code and owner-only profile editing');
+  assert.equal(status(await admin.request('/api/admin'), 200, 'Participant name unchanged').participants.find(p => p.id === participant.id).name, 'HTTP 測試同學');
+  passed('Card-link profile editing across clients, default names, isolation, activation, CSRF and legacy account compatibility');
 
   status(await guest.request('/api/tree', { action: 'register', token: card.token, name: '暖暖耶誕樹' }), 200, 'Card tree registration');
   const grown = status(await guest.request('/api/tree', { action: 'grow', token: card.token, count: 7, requestId: 'http-grow-once' }), 200, 'Tree growth');
@@ -135,17 +171,17 @@ try {
   await stop(); await start();
   data = status(await admin.request('/api/admin'), 200, 'Admin session persists across restart');
   assert.ok(data.cards.every((item, index) => item.token === initialTokens[index]), 'Restart preserves every NFC URL');
-  assert.equal(data.participants[0].name, 'HTTP 測試同學');
+  assert.equal(data.participants.find(p => p.id === participant.id).name, 'HTTP 測試同學');
   assert.equal(status(await member.request(`/api/me?token=${card.token}`), 200, 'Owner persists').isOwner, true);
   assert.equal(status(await guest.request(`/api/event?token=${card.token}`), 200, 'Profile persists').card.profile.displayName, profile.displayName);
   assert.equal(status(await guest.request(`/api/tree?token=${card.token}`), 200, 'Tree persists').player.growth, 7);
   assert.equal(status(await guest.request('/api/tree/leaderboard'), 200, 'Rank persists').entries[0].growth, 7);
   status(await member.request('/api/auth/logout', {}), 200, 'Member logout');
   assert.equal(status(await member.request('/api/auth/session'), 200, 'Logged out session').user, null);
-  status(await member.request('/api/profile', profile), 401, 'Logout revokes profile access');
+  status(await member.request('/api/profile', profile), 200, 'Card capability works after account logout');
   status(await admin.request('/api/auth/logout', {}), 200, 'Admin logout');
   status(await admin.request('/api/admin'), 401, 'Logout revokes admin access');
-  passed('Restart preserves cards, users, sessions, profiles and scores; logout revokes access');
+  passed('Restart preserves cards, legacy users, profiles and scores; admin logout revokes admin access');
 } catch (error) {
   // Avoid accidental secret output in assertion diagnostics.
   console.error(String(error?.message || error).replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]'));

@@ -1,6 +1,7 @@
 export type TreeLevel = 1 | 2 | 3 | 4 | 5 | 6;
 export interface TreePlayer {
   id: string;
+  cardSerial: string;
   name: string;
   growth: number;
   heightCm: number;
@@ -21,7 +22,8 @@ export interface TreeLeaderboard {
   serverNow: number;
 }
 export type TreeAction =
-  | { action: "register" | "rename"; name: string; token?: string }
+  | { action: "register"; name?: string; token?: string }
+  | { action: "rename"; name: string; token?: string }
   | { action: "grow"; count: number; requestId: string; token?: string };
 export function treeLevel(growth: number): TreeLevel {
   return growth < 10 ? 1 : growth < 30 ? 2 : growth < 75 ? 3 : growth < 150 ? 4 : growth < 300 ? 5 : 6;

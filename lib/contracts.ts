@@ -62,7 +62,15 @@ export interface AdminData {
   user: UserIdentity;
   audit: AuditEntry[];
 }
-export interface MeData { user: UserIdentity | null; isOwner: boolean; profile: Profile | null }
+export interface MeData {
+  user: UserIdentity | null;
+  /** Legacy account claim status; card-link editing does not depend on it. */
+  isOwner: boolean;
+  canEdit: boolean;
+  serial: string;
+  bound: boolean;
+  profile: Profile | null;
+}
 export interface ActionResult { ok: true; message: string; code?: string; count?: number }
 export interface ApiError { error: string; code: string }
 export type AdminAction =

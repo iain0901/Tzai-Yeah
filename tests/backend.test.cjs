@@ -130,7 +130,81 @@ test('150 cards, transactional binding/import, publication isolation and explici
   sqlite.close();
 });
 
-test('ownership requires separate expiring claim code; recovery revokes prior account', async () => {
+
+test('card links edit only their bound profile without account login', async () => {
+  const { req, action, sqlite } = makeApp();
+  await action({ action: 'generateCards', count: 3 });
+  const [card, otherCard, unbound] = (await req('/api/admin')).data.cards;
+  await action({ action: 'saveParticipant', name: '持卡甲', cardId: card.id });
+  await action({ action: 'saveParticipant', name: '持卡乙', cardId: otherCard.id });
+  const people = (await req('/api/admin')).data.participants;
+  const person = people.find(p => p.cardId === card.id);
+  const otherPerson = people.find(p => p.cardId === otherCard.id);
+  const save = (token, extra = {}, options = {}) => req('/api/profile', { method: 'POST', body: { token, displayName: '', bio: '卡片自己的介紹', url: '', mode: 'page', ...extra }, user: null, ...options });
+  const first = await req(`/api/me?token=${card.token}`, { user: null });
+  assert.equal(first.status, 200); assert.equal(first.data.user, null);
+  assert.equal(first.data.isOwner, false); assert.equal(first.data.canEdit, true);
+  assert.equal(first.data.serial, card.serial); assert.equal(first.data.bound, true);
+  assert.equal(first.data.profile.displayName, `#${card.serial}`);
+  assert.equal(first.headers.get('cache-control'), 'no-store, max-age=0');
+  assert.equal(first.headers.get('referrer-policy'), 'no-referrer');
+  assert.equal((await save(card.token, { participantId: otherPerson.id, owner_id: 'attacker', name: '不能更改名單' })).status, 200);
+  assert.equal((await req(`/api/me?token=${card.token}`, { user: 'different-account' })).data.profile.bio, '卡片自己的介紹');
+  assert.equal((await req(`/api/me?token=${otherCard.token}`, { user: null })).data.profile.bio, '');
+  assert.equal(sqlite.prepare('SELECT name,owner_id FROM participants WHERE id=?').get(person.id).name, '持卡甲');
+  assert.equal(sqlite.prepare('SELECT owner_id FROM participants WHERE id=?').get(person.id).owner_id, null);
+  assert.equal((await save(card.token, { displayName: '自訂卡名' }, { user: 'different-account' })).status, 200);
+  assert.equal((await req(`/api/me?token=${card.token}`, { user: null })).data.profile.displayName, '自訂卡名');
+  assert.equal((await save(card.token, { displayName: '   ' })).status, 200);
+  assert.equal((await req(`/api/me?token=${card.token}`, { user: null })).data.profile.displayName, `#${card.serial}`);
+  assert.equal((await req('/api/me', { user: null })).status, 400);
+  assert.equal((await save(undefined)).status, 400);
+  for (const token of ['not-a-card', '0'.repeat(48)]) {
+    assert.equal((await req(`/api/me?token=${token}`, { user: null })).status, 404);
+    assert.equal((await save(token)).status, 404);
+  }
+  assert.equal((await req(`/api/me?token=${unbound.token}`, { user: null })).status, 409);
+  assert.equal((await save(unbound.token)).status, 409);
+  assert.equal((await save(card.token, {}, { origin: false })).status, 403);
+  assert.equal((await save(card.token, { url: 'javascript:alert(1)' })).status, 400);
+  assert.equal((await save(card.token, { url: 'https://love.test/t/anything' })).status, 400);
+  await action({ action: 'saveEvent', event: { phase: 'after' } });
+  assert.equal((await req(`/api/event?token=${card.token}`, { user: null })).data.card.profile.displayName, `#${card.serial}`);
+  await action({ action: 'setCardActive', cardId: card.id, active: false });
+  assert.equal((await req(`/api/me?token=${card.token}`, { user: null })).status, 410);
+  assert.equal((await save(card.token)).status, 410);
+  assert.equal((await req('/api/admin', { user: null })).status, 401);
+  assert.equal((await req('/api/admin', { user: 'different-account' })).status, 403);
+  const audits = sqlite.prepare("SELECT actor,detail FROM audit WHERE action='saveProfile'").all();
+  assert.ok(audits.every(a => a.actor === `card:${card.id}` && !a.detail.includes(card.token)));
+  assert.equal(sqlite.prepare('SELECT owner_id,claim_hash FROM participants WHERE id=?').get(person.id).claim_hash, null);
+  sqlite.close();
+});
+
+test('profile writes recheck card binding and token at commit time', async () => {
+  for (const mutation of ['disable', 'rebind', 'rotate']) {
+    const { req, action, sqlite, setBeforeBatch } = makeApp();
+    await action({ action: 'generateCards', count: 1 });
+    const card = (await req('/api/admin')).data.cards[0];
+    await action({ action: 'saveParticipant', name: '原參加者', cardId: card.id });
+    await action({ action: 'saveParticipant', name: '另位參加者' });
+    const people = (await req('/api/admin')).data.participants;
+    const original = people.find(p => p.cardId === card.id);
+    const other = people.find(p => !p.cardId);
+    setBeforeBatch(() => {
+      if (mutation === 'disable') sqlite.prepare('UPDATE cards SET active=0 WHERE id=?').run(card.id);
+      if (mutation === 'rebind') sqlite.prepare('UPDATE card_bindings SET participant_id=? WHERE card_id=?').run(other.id, card.id);
+      if (mutation === 'rotate') sqlite.prepare('UPDATE cards SET token=? WHERE id=?').run('f'.repeat(48), card.id);
+    });
+    const saved = await req('/api/profile', { method: 'POST', body: { token: card.token, displayName: '不應寫入', bio: '', url: '', mode: 'page' }, user: null });
+    assert.equal(saved.status, 409, mutation); assert.equal(saved.data.code, 'card_access_changed', mutation);
+    for (const person of [original, other]) assert.equal(JSON.parse(sqlite.prepare('SELECT profile FROM participants WHERE id=?').get(person.id).profile).displayName, '', mutation);
+    assert.equal(sqlite.prepare("SELECT count(*) AS n FROM audit WHERE action='saveProfile'").get().n, 0, mutation);
+    sqlite.close();
+  }
+});
+
+test('legacy claims retain expiring codes and owner metadata without gating card-link editing', async () => {
   const { req, action, sqlite } = makeApp();
   await action({ action: 'generateCards', count: 2 });
   let admin = (await req('/api/admin')).data;
@@ -140,7 +214,7 @@ test('ownership requires separate expiring claim code; recovery revokes prior ac
   const person = admin.participants[0];
   assert.equal((await action({ action: 'publishGroups' })).status, 409);
   const save = body => req('/api/profile', { method: 'POST', body: { token: card.token, displayName: '我的名字', bio: '很高興相遇', url: 'https://example.org/me', mode: 'page', ...body }, user: 'alice' });
-  assert.equal((await save({})).status, 403);
+  assert.equal((await save({})).status, 200);
   const issued = await action({ action: 'issueClaimCode', participantId: person.id });
   assert.match(issued.data.code, /^[a-f0-9]{32}$/);
   assert.equal(sqlite.prepare('SELECT claim_hash FROM participants WHERE id=?').get(person.id).claim_hash.length, 64);
@@ -160,7 +234,7 @@ test('ownership requires separate expiring claim code; recovery revokes prior ac
   assert.equal((await req(`/api/event?token=${card.token}`, { user: null })).data.card.profile.url, 'https://example.org/me');
   assert.equal((await action({ action: 'issueClaimCode', participantId: person.id })).status, 409);
   const recovery = await action({ action: 'issueClaimCode', participantId: person.id, resetOwner: true });
-  assert.equal((await save({})).status, 403);
+  assert.equal((await save({})).status, 200);
   assert.equal((await claim(recovery.data.code, 'bob')).status, 200);
   assert.equal((await req(`/api/me?token=${card.token}`, { user: 'bob' })).data.isOwner, true);
   sqlite.close();
@@ -196,7 +270,7 @@ test('concurrent admin edits cannot publish incomplete groups or report false pr
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit WHERE action='publishGroups'").get().n, 1);
   const issued = await action({ action: 'issueClaimCode', participantId: person.id });
   await req('/api/claim', { method: 'POST', body: { token: card.token, code: issued.data.code }, user: 'alice' });
-  setBeforeBatch(() => sqlite.prepare('UPDATE participants SET owner_id=NULL WHERE id=?').run(person.id));
+  setBeforeBatch(() => sqlite.prepare('UPDATE cards SET active=0 WHERE id=?').run(card.id));
   const save = await req('/api/profile', { method: 'POST', body: { token: card.token, displayName: '不應儲存', url: 'https://example.org', mode: 'page' }, user: 'alice' });
   assert.equal(save.status, 409);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit WHERE action='saveProfile'").get().n, 0);

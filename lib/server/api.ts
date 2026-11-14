@@ -42,11 +42,11 @@ async function bodyFor(request: Request): Promise<Row> {
     return body;
   } catch { throw new ApiFault(400, "送出的資料格式不正確。"); }
 }
-function auditStatement(user: UserIdentity, action: string, detail: string, onlyIfChanged = false) {
+function auditStatement(user: UserIdentity | string, action: string, detail: string, onlyIfChanged = false) {
   const sql = onlyIfChanged
     ? "INSERT INTO audit (id, actor, action, detail, created_at) SELECT ?, ?, ?, ?, ? WHERE changes()>0"
     : "INSERT INTO audit (id, actor, action, detail, created_at) VALUES (?, ?, ?, ?, ?)";
-  return db().prepare(sql).bind(crypto.randomUUID(), user.email, action, detail, new Date().toISOString());
+  return db().prepare(sql).bind(crypto.randomUUID(), typeof user === "string" ? user : user.email, action, detail, new Date().toISOString());
 }
 function settingStatement(id: string, value: unknown) {
   return db().prepare("INSERT INTO settings (id, value) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").bind(id, JSON.stringify(value));
@@ -70,13 +70,20 @@ async function publicCardRow(token: string) {
   if (!row.active) throw new ApiFault(410, "這張小卡已停用，請洽工作人員協助。", "card_inactive");
   return row;
 }
+function cardProfile(row: Row, includeSaved = true): Profile {
+  const profile = includeSaved && row.profile ? JSON.parse(String(row.profile)) as Profile : { ...EMPTY_PROFILE };
+  return { ...profile, displayName: profile.displayName.trim() || `#${row.serial}` };
+}
+function requireBoundCard(row: Row) {
+  if (!row.participant_id) throw new ApiFault(409, "這張小卡還在等主辦配對，完成後就能編輯個人介紹。", "unbound_card");
+}
 async function publicEvent(url: URL): Promise<PublicEventData> {
   const token = url.searchParams.get("token");
   const [{ event, publication }, row] = await Promise.all([settingsData(), token ? publicCardRow(token) : null]);
   if (!row) return { event, card: null };
   const participantId = row.participant_id as string | null;
   const visibleGroup = event.phase === "live" && event.revealOpen && participantId ? publication.assignments[participantId] || null : null;
-  return { event, card: { serial: String(row.serial), active: true, bound: !!participantId, group: visibleGroup, profile: event.phase === "after" && row.profile ? JSON.parse(String(row.profile)) : { ...EMPTY_PROFILE }, claimed: !!row.owner_id } };
+  return { event, card: { serial: String(row.serial), active: true, bound: !!participantId, group: visibleGroup, profile: cardProfile(row, event.phase === "after"), claimed: !!row.owner_id } };
 }
 async function adminData(request: Request): Promise<AdminData> {
   const user = requireAdmin(request);
@@ -231,8 +238,10 @@ async function me(request: Request, url: URL) {
   const token = url.searchParams.get("token");
   if (!token) throw new ApiFault(400, "請從自己的小卡開啟。");
   const row = await publicCardRow(token);
+  requireBoundCard(row);
   const isOwner = !!user && row.owner_id === user.id;
-  return { user, isOwner, profile: isOwner && row.profile ? JSON.parse(String(row.profile)) as Profile : null };
+  // Legacy account ownership remains informational; this active card URL grants access.
+  return { user, isOwner, canEdit: true, serial: String(row.serial), bound: true, profile: cardProfile(row) };
 }
 async function claim(request: Request, body: Row) {
   const user = requireUser(request);
@@ -255,15 +264,16 @@ async function claim(request: Request, body: Row) {
   return { ok: true, message: "認領成功，現在可以設定你的小卡。" };
 }
 async function saveProfile(request: Request, body: Row) {
-  const user = requireUser(request);
   const token = textValue(body.token, "小卡代碼", 48, true);
   const row = await publicCardRow(token);
-  if (!row.owner_id || row.owner_id !== user.id) throw new ApiFault(403, "請先使用工作人員提供的認領碼認領小卡。", "owner_required");
+  requireBoundCard(row);
   const profile = parseProfile(body);
   // Prevent redirect loops back into this card or the same Site.
   if (profile.url && new URL(profile.url).origin === publicOrigin()) throw new ApiFault(400, "個人連結請填寫本站以外的網址。");
-  const result = await db().batch([db().prepare("UPDATE participants SET profile=? WHERE id=? AND owner_id=?").bind(JSON.stringify(profile), row.participant_id, user.id), auditStatement(user, "saveProfile", `participant=${row.participant_id}`, true)]);
-  if (!result[0].meta.changes) throw new ApiFault(409, "小卡擁有者已變更，請重新登入或洽工作人員。", "ownership_changed");
+  // Recheck the token, activation and binding in the write itself. A concurrent
+  // disable, token rotation or rebind must not write to the old participant.
+  const result = await db().batch([db().prepare("UPDATE participants SET profile=? WHERE id=? AND EXISTS (SELECT 1 FROM card_bindings b JOIN cards c ON c.id=b.card_id WHERE b.participant_id=participants.id AND c.id=? AND c.token=? AND c.active=1)").bind(JSON.stringify(profile), row.participant_id, row.id, token), auditStatement(`card:${row.id}`, "saveProfile", `participant=${row.participant_id}`, true)]);
+  if (!result[0].meta.changes) throw new ApiFault(409, "小卡狀態剛剛有變更，請重新讀取後再試。", "card_access_changed");
   return { ok: true, message: "個人連結已儲存，活動結束後會顯示在小卡上。" };
 }
 async function exportCsv(request: Request, url: URL) {

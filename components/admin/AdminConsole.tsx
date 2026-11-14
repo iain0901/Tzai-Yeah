@@ -11,7 +11,7 @@ const tabs: { id: Tab; label: string; short: string }[] = [
   { id: "groups", label: "人工分組", short: "分組" }, { id: "cards", label: "NFC 小卡", short: "小卡" }, { id: "content", label: "頁面內容", short: "內容" },
 ];
 const phases: { value: EventPhase; title: string; text: string }[] = [
-  { value: "before", title: "活動前", text: "活動資訊與劇情預告" },
+  { value: "before", title: "活動前", text: "活動介紹、預告影片與資訊動畫" },
   { value: "live", title: "活動中", text: "公布自己的組別與集合地點" },
   { value: "after", title: "活動後", text: "紀念畫面與活動相簿入口" },
 ];
@@ -80,6 +80,8 @@ export default function AdminConsole() {
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingPhase, setPendingPhase] = useState<EventPhase | null>(null);
+  const [savedPhase, setSavedPhase] = useState<EventPhase | null>(null);
   const [modal, setModal] = useState<ModalState>(null);
   const [modalError, setModalError] = useState("");
   const [claimCode, setClaimCode] = useState("");
@@ -114,6 +116,22 @@ export default function AdminConsole() {
       return result as ActionResult;
     } catch (reason) { const message = reason instanceof Error ? reason.message : "連線中斷，請稍後再試。"; if (modal) setModalError(message); else setError(message); return null; }
     finally { setBusy(false); }
+  }
+
+
+  async function switchPhase(phase: EventPhase) {
+    if (!data || busy || pendingPhase || data.event.phase === phase) return;
+    setPendingPhase(phase);
+    setSavedPhase(null);
+    try {
+      const result = await action({ action: "saveEvent", event: { phase } });
+      if (result) {
+        setSavedPhase(phase);
+        setToast("已儲存：活動已切換為「" + phases.find(item => item.value === phase)?.title + "」。");
+      }
+    } finally {
+      setPendingPhase(null);
+    }
   }
 
   async function copy(text: string, label = "已複製") {
@@ -162,8 +180,25 @@ export default function AdminConsole() {
         <div className="ad-page-heading"><div><p className="ad-eyebrow">TZAI YEAH / 2026</p><h1>{tabs.find(item => item.id === tab)?.label}</h1><p>{tab === "overview" ? "把準備的每一小步，拼成溫暖的一晚。" : tab === "participants" ? "依姓名發卡；每位參加者的分組，由你們親手安排。" : tab === "groups" ? "先編輯草稿，確認後再發布給參加者。" : tab === "cards" ? "同樣的卡面，各自獨立的網址。卡套流水號請與這裡一致。" : "預告還沒完成也沒關係，活動資訊會先好好迎接每個人。"}</p></div><button className="ad-button ad-button-quiet" onClick={() => void load()} disabled={busy}>重新整理</button></div>
 
         {tab === "overview" && <>
+          <section className="ad-section ad-phase-control" aria-labelledby="ad-phase-title">
+            <div className="ad-section-heading">
+              <div><h2 id="ad-phase-title">活動階段</h2><p>在這裡切換所有小卡的主畫面。連線正常且頁面開啟時，約 15 秒內更新；回到頁面也會重新確認。</p></div>
+              <div className="ad-phase-current"><small>目前對外顯示</small><strong>{currentPhase.title}</strong></div>
+            </div>
+            <div className="ad-phase-options" aria-label="選擇活動階段">
+              {phases.map(phase => <button type="button" key={phase.value} className={data.event.phase === phase.value ? "is-selected" : ""} aria-pressed={data.event.phase === phase.value} aria-busy={pendingPhase === phase.value} onClick={() => void switchPhase(phase.value)} disabled={busy || data.event.phase === phase.value}>
+                <span>{phase.title}</span><small>{phase.text}</small>
+                <em>{pendingPhase === phase.value ? "正在儲存…" : data.event.phase === phase.value ? "目前顯示" : "切換至此階段 →"}</em>
+                {data.event.phase === phase.value && <b aria-hidden="true">✓</b>}
+              </button>)}
+            </div>
+            <p className={"ad-phase-feedback " + (savedPhase === data.event.phase && !pendingPhase ? "is-saved" : "")} role="status" aria-live="polite" aria-atomic="true">
+              {pendingPhase ? "正在切換至「" + phases.find(phase => phase.value === pendingPhase)?.title + "」…" : savedPhase === data.event.phase ? "已儲存，目前對外顯示「" + currentPhase.title + "」。" : "點選階段即會儲存，同一個小卡網址會顯示對應內容。"}
+            </p>
+            <div className="ad-setting-line"><div><strong>開放分組揭曉</strong><p>先發布分組，再切到「活動中」並開放揭曉。持卡者會在原本的頁面看到自己的組別，不必再次感應。</p></div><button className={"ad-toggle " + (data.event.revealOpen ? "is-on" : "")} role="switch" aria-checked={data.event.revealOpen} aria-label="開放分組揭曉" onClick={() => void action({ action: "saveEvent", event: { revealOpen: !data.event.revealOpen } })} disabled={busy}><span /></button></div>
+            {data.event.revealOpen && !data.event.publishedVersion && <p className="ad-inline-warning">尚未發布分組。請先到「人工分組」確認並發布。</p>}
+          </section>
           <div className="ad-metrics">{[{ label: "參加者", value: data.stats.participants }, { label: "已配對卡片", value: data.stats.bound }, { label: "已安排分組", value: data.stats.grouped }, { label: "已報到", value: data.stats.checkedIn }].map(item => <div key={item.label}><span>{item.label}</span><strong>{item.value}<small>人</small></strong></div>)}</div>
-          <section className="ad-section"><div className="ad-section-heading"><div><h2>現在，故事走到哪裡？</h2><p>由主辦切換全體持卡者的主畫面。連線正常且頁面開啟時，約 15 秒內更新；回到頁面也會重新確認。</p></div><span className="ad-status">目前：{currentPhase.title}</span></div><div className="ad-phase-options">{phases.map(phase => <button key={phase.value} className={data.event.phase === phase.value ? "is-selected" : ""} aria-pressed={data.event.phase === phase.value} onClick={() => void action({ action: "saveEvent", event: { phase: phase.value } })} disabled={busy || data.event.phase === phase.value}><span>{phase.title}</span><small>{phase.text}</small>{data.event.phase === phase.value && <b aria-hidden="true">✓</b>}</button>)}</div><div className="ad-setting-line"><div><strong>開放分組揭曉</strong><p>先發布分組，再切到「活動中」並開放揭曉。持卡者會在原本的頁面看到自己的組別，不必再次感應。</p></div><button className={`ad-toggle ${data.event.revealOpen ? "is-on" : ""}`} role="switch" aria-checked={data.event.revealOpen} aria-label="開放分組揭曉" onClick={() => void action({ action: "saveEvent", event: { revealOpen: !data.event.revealOpen } })} disabled={busy}><span /></button></div>{data.event.revealOpen && !data.event.publishedVersion && <p className="ad-inline-warning">尚未發布分組。請先到「人工分組」確認並發布。</p>}</section>
           <div className="ad-two-column"><section className="ad-section"><h2>發卡前的三件事</h2><ol className="ad-checklist"><li><span className={data.cards.length ? "is-done" : ""}>1</span><div><strong>建立卡片網址</strong><p>{data.cards.length ? `已建立 ${data.cards.length} 張，寫入 NFC 後逐張感應核對。` : "先建立 150 張卡片，匯出專屬網址供 NFC 寫入。"}</p></div></li><li><span className={data.participants.length ? "is-done" : ""}>2</span><div><strong>匯入名單並配對</strong><p>將卡片放入同號卡套，指定領卡者。</p></div></li><li><span className={data.event.publishedVersion ? "is-done" : ""}>3</span><div><strong>人工分組，確認發布</strong><p>發布後仍須切到活動中並開放揭曉。</p></div></li></ol><button className="ad-button ad-button-primary" onClick={() => data.cards.length ? selectTab("participants") : openModal({ type: "generate" })}>{data.cards.length ? "準備參加者名單" : "建立 150 張小卡"}</button></section><section className="ad-section"><h2>上場前，先走一次</h2><p className="ad-muted">示範頁只用來檢查畫面，不會變更正式資料。</p><div className="ad-preview-links">{phases.map(phase => <a key={phase.value} href={`/demo?phase=${phase.value}`} target="_blank" rel="noreferrer"><span>{phase.title}<small>{phase.text}</small></span><span aria-hidden="true">↗</span></a>)}</div><button className="ad-button" disabled={busy || !data.participants.length} onClick={() => void exportCSV("offline")}>下載現場備用名單</button></section></div>
           <section className="ad-section"><div className="ad-section-heading"><h2>最近的操作</h2><small className="ad-muted">時間以台灣時間顯示</small></div>{data.audit.length ? <ul className="ad-audit">{data.audit.slice(0, 8).map(item => <li key={item.id}><time>{dateTime(item.createdAt)}</time><span>{auditSummary(item.action, item.detail)}</span><small>{item.actor}</small></li>)}</ul> : <p className="ad-muted">完成設定後，操作紀錄會留在這裡。</p>}</section>
         </>}

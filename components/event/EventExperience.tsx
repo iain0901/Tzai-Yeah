@@ -103,8 +103,8 @@ function EventApp({ token, demo }: { token: string; demo?: EventPhase }) {
         {screen === "home" && event.phase === "live" && !group && <>
           <div className="app-section-heading"><span className="app-eyebrow">A LITTLE SURPRISE</span><h1>相遇，正在路上。</h1></div><div className="app-world-slot"><AnimatedWorld compact onInvite={() => { void reload(); setFeedback("幫你再找找，今晚的拼圖夥伴。"); }} onFeedback={setFeedback} soundEnabled={sound}/></div><div className="app-waiting"><h2>{!token && !demo ? "今晚的夥伴，即將相聚。" : loading && !card ? "正在打開你的專屬小卡。" : !card?.bound ? "你的小卡已準備好。" : !event.revealOpen ? "拼圖夥伴，即將揭曉。" : "你的組別還在準備中。"}</h2><p>{!token && !demo ? "從你的專屬連結進來，就會顯示自己的組別。" : loading && !card ? "稍等一下，我們正在查看你的組別。" : !card?.bound ? "領卡資料尚未完成，請讓工作人員幫你確認。" : !event.revealOpen ? "留在這裡就好，揭曉時會為你打開。" : "請找工作人員，我們會幫你找到夥伴。"}</p><button className="app-button cream" onClick={reload}><RotateCcw size={17}/>重新查看</button></div>
         </>}
-        {screen === "pass" && <PersonalCard card={card || null} event={event} token={token} demo={!!demo} onRead={read} onEdit={() => demo ? read("這是一張示範小卡", "正式小卡可登入後認領與編輯。") : setEdit(true)}/>}
-        {screen === "game" && <SoloTreeGame token={token} animations={motion} active={!menu && !intro && !video && !reading && !edit}/>}
+        {screen === "pass" && <PersonalCard card={card || null} event={event} token={token} demo={!!demo} onRead={read} onEdit={() => demo ? read("這是一張示範小卡", "正式小卡可直接使用專屬連結編輯。") : setEdit(true)}/>}
+        {screen === "game" && <SoloTreeGame token={card && !demo ? token : ""} animations={motion} active={!menu && !intro && !video && !reading && !edit}/>}
         </>}
       </main></SceneTransition>
     </div>
