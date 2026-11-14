@@ -176,6 +176,8 @@ test('card links edit only their bound profile without account login', async () 
   const otherPerson = people.find(p => p.cardId === otherCard.id);
   const save = (token, extra = {}, options = {}) => req('/api/profile', { method: 'POST', body: { token, displayName: '', bio: '卡片自己的介紹', url: '', mode: 'page', ...extra }, user: null, ...options });
   const first = await req(`/api/me?token=${card.token}`, { user: null });
+  assert.equal((await req(`/api/event?token=${card.token}`, { user: null })).data.card.headerName, '持卡甲');
+  assert.equal((await req(`/api/event?token=${unbound.token}`, { user: null })).data.card.headerName, '訪客');
   assert.equal(first.status, 200); assert.equal(first.data.user, null);
   assert.equal(first.data.isOwner, false); assert.equal(first.data.canEdit, true);
   assert.equal(first.data.serial, card.serial); assert.equal(first.data.bound, true);
@@ -189,6 +191,7 @@ test('card links edit only their bound profile without account login', async () 
   assert.equal(sqlite.prepare('SELECT owner_id FROM participants WHERE id=?').get(person.id).owner_id, null);
   assert.equal((await save(card.token, { displayName: '自訂卡名' }, { user: 'different-account' })).status, 200);
   assert.equal((await req(`/api/me?token=${card.token}`, { user: null })).data.profile.displayName, '自訂卡名');
+  assert.equal((await req(`/api/event?token=${card.token}`, { user: null })).data.card.headerName, '自訂卡名');
   assert.equal((await save(card.token, { displayName: '   ' })).status, 200);
   assert.equal((await req(`/api/me?token=${card.token}`, { user: null })).data.profile.displayName, `#${card.serial}`);
   assert.equal((await req('/api/me', { user: null })).status, 400);

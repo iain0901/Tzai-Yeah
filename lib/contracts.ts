@@ -25,6 +25,7 @@ export interface Group { id: string; name: string; location: string; note: strin
 export interface Profile { displayName: string; bio: string; url: string; mode: ProfileMode }
 export interface PublicCard {
   serial: string;
+  headerName: string;
   active: boolean;
   bound: boolean;
   group: Group | null;

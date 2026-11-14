@@ -70,7 +70,7 @@ async function settingsData(): Promise<{ event: EventConfig; publication: Public
 }
 async function publicCardRow(token: string) {
   if (!/^[a-f0-9]{48}$/.test(token)) throw new ApiFault(404, "找不到這張小卡，請重新感應或洽工作人員。", "card_not_found");
-  const row = await db().prepare("SELECT c.id,c.serial,c.active,b.participant_id,p.owner_id,p.profile,p.claim_hash,p.claim_created_at FROM cards c LEFT JOIN card_bindings b ON b.card_id=c.id LEFT JOIN participants p ON p.id=b.participant_id WHERE c.token=?").bind(token).first<Row>();
+  const row = await db().prepare("SELECT c.id,c.serial,c.active,b.participant_id,p.name AS participant_name,p.owner_id,p.profile,p.claim_hash,p.claim_created_at FROM cards c LEFT JOIN card_bindings b ON b.card_id=c.id LEFT JOIN participants p ON p.id=b.participant_id WHERE c.token=?").bind(token).first<Row>();
   if (!row) throw new ApiFault(404, "找不到這張小卡，請重新感應或洽工作人員。", "card_not_found");
   if (!row.active) throw new ApiFault(410, "這張小卡已停用，請洽工作人員協助。", "card_inactive");
   return row;
@@ -96,7 +96,8 @@ async function publicEvent(url: URL): Promise<PublicEventData> {
   if (!row) return { event, card: null };
   const participantId = row.participant_id as string | null;
   const visibleGroup = event.phase === "live" && event.revealOpen && participantId ? publication.assignments[participantId] || null : null;
-  return { event, card: { serial: String(row.serial), active: true, bound: !!participantId, group: visibleGroup, profile: cardProfile(row, event.phase === "after"), claimed: !!row.owner_id } };
+  const headerName = storedProfile(row.profile)?.displayName.trim() || String(row.participant_name || "").trim() || "訪客";
+  return { event, card: { serial: String(row.serial), headerName, active: true, bound: !!participantId, group: visibleGroup, profile: cardProfile(row, event.phase === "after"), claimed: !!row.owner_id } };
 }
 async function adminData(request: Request): Promise<AdminData> {
   const user = requireAdmin(request);

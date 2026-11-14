@@ -13,11 +13,12 @@ import PersonalCard from "./PersonalCard";
 import SoloTreeGame from "./SoloTreeGame";
 import useChristmasMusic from "./useChristmasMusic";
 import "./app-experience.css";
+import "./header-name.css";
 
 type Screen = "home" | "info" | "pass" | "game";
 type Reading = { title: string; text: string };
 function demoData(phase: EventPhase): PublicEventData {
-  return { event: { ...DEFAULT_EVENT, phase, revealOpen: true, publishedVersion: 1 }, card: { serial: "027", active: true, bound: true, claimed: false, group: phase === "live" ? { id: "demo", name: "暖心薑餅組", location: "教育館・第六組區域", note: "帶著你的小卡，和新朋友打聲招呼。", color: "#c64b44" } : null, profile: { displayName: "", bio: "", url: "", mode: "page" } } };
+  return { event: { ...DEFAULT_EVENT, phase, revealOpen: true, publishedVersion: 1 }, card: { serial: "027", headerName: "小耶", active: true, bound: true, claimed: false, group: phase === "live" ? { id: "demo", name: "暖心薑餅組", location: "教育館・第六組區域", note: "帶著你的小卡，和新朋友打聲招呼。", color: "#c64b44" } : null, profile: { displayName: "", bio: "", url: "", mode: "page" } } };
 }
 function youtubeId(url: string): string | null {
   try { const u = new URL(url); const host = u.hostname.toLowerCase().replace(/^www\./, ""); let id = ""; if (host === "youtu.be") id = u.pathname.slice(1).split("/")[0]; else if (["youtube.com", "m.youtube.com", "youtube-nocookie.com"].includes(host)) id = u.searchParams.get("v") || u.pathname.match(/^\/(?:shorts|embed)\/([^/]+)/)?.[1] || ""; return /^[\w-]{11}$/.test(id) ? id : null; } catch { return null; }
@@ -80,7 +81,7 @@ function EventApp({ token, demo }: { token: string; demo?: EventPhase }) {
   return <div className={`love-app ${!motion ? "motion-paused" : ""}`}>
     <audio ref={music.ref} src="/assets/christmas-music-box.mp3" loop preload="none" aria-label="聖誕音樂盒背景音樂"/>
     <div className="app-ambient" aria-hidden="true">{Array.from({ length: 12 }, (_, i) => <i key={i} style={{ left: `${7 + i * 8}%`, animationDelay: `${i * -1.7}s`, animationDuration: `${10 + i % 4 * 3}s` }}/>)}</div>
-    <header className="app-header"><button className="app-brand" onClick={() => go("home")} aria-label="載耶首頁"><Puzzle size={24}/><span>載耶 <em>2026</em></span></button><div>{card && <span className="app-serial">#{card.serial}</span>}<button className={`app-icon ${music.playing ? "app-music-playing" : ""}`} onClick={music.toggle} aria-label={music.enabled ? "暫停聖誕音樂" : "播放聖誕音樂"} aria-pressed={music.enabled}>{music.enabled ? <Volume2 size={20}/> : <VolumeX size={20}/>}</button><button className="app-icon" onClick={() => setMenu(true)} aria-label="開啟選單"><Menu size={20}/></button></div></header>
+    <header className="app-header"><button className="app-brand" onClick={() => go("home")} aria-label="載耶首頁"><Puzzle size={24}/><span>載耶 <em>2026</em></span></button><div>{card && <span className="app-serial app-header-name" title={card.headerName}>{card.headerName}</span>}<button className={`app-icon ${music.playing ? "app-music-playing" : ""}`} onClick={music.toggle} aria-label={music.enabled ? "暫停聖誕音樂" : "播放聖誕音樂"} aria-pressed={music.enabled}>{music.enabled ? <Volume2 size={20}/> : <VolumeX size={20}/>}</button><button className="app-icon" onClick={() => setMenu(true)} aria-label="開啟選單"><Menu size={20}/></button></div></header>
     <div className="app-viewport"><Lights dancing={lightParty}/>{loading && <div className="app-loading" role="status" aria-label="正在讀取活動資訊"/>}{error && <div className="app-error" role="alert"><span>{error}</span><button onClick={reload}>重試</button></div>}{phaseNotice && <div className="app-phase-notice" role="status"><span>{phaseNotice}</span><button onClick={() => go("home")}>{event.phase === "live" ? "查看分組" : "打開看看"}<ArrowRight size={13}/></button></div>}
       {demo && <div className="app-demo">示範畫面 {(["before","live","after"] as EventPhase[]).map((p, i) => <a href={`/demo?phase=${p}`} key={p} aria-current={demo === p ? "page" : undefined}>{["活動前","當天","活動後"][i]}</a>)}</div>}
       <SceneTransition sceneKey={screen === "game" ? "game" : `${screen}-${event.phase}`} direction={direction} motion={motion}><main className={`app-screen app-screen-${screen} ${screen === "home" && event.phase === "live" ? "app-live-home" : ""}`} id="app-panel" aria-label={screen === "home" ? event.phase === "live" ? "我的分組" : event.phase === "after" ? "活動回顧" : "聖誕邀請" : screen === "info" ? "活動資訊" : screen === "game" ? "搖搖耶誕樹" : "我的紀念小卡"}>
