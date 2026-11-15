@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { AdminAction, AdminData, ActionResult, ApiError, EventConfig, EventPhase, Group, Participant } from "@/lib/contracts";
 import { prepareImport, type ImportPreview } from "./csv";
+import NfcWriter from "./NfcWriter";
 
 type Tab = "participants" | "groups";
 type ModalState =
   | { type: "participant"; value?: Participant }
   | { type: "profile"; id: string }
+  | { type: "nfc"; id: string }
   | { type: "group"; value?: Group }
   | { type: "deleteGroup"; value: Group }
   | { type: "publish" }
@@ -194,9 +196,12 @@ export default function AdminConsole() {
   const groupName = (id: string | null) => data?.groups.find(group => group.id === id)?.name ?? "尚未分組";
   const participants = data?.participants.filter(person => [person.name, person.house, String(person.householdNumber ?? ""), groupName(person.groupId)].some(value => value.toLocaleLowerCase().includes(query))
     && (!groupFilter || (groupFilter === "unassigned" ? !person.groupId : person.groupId === groupFilter))) ?? [];
-  const viewedPerson = modal?.type === "profile" ? data?.participants.find(person => person.id === modal.id) : null;
+  const viewedPerson = modal?.type === "profile" || modal?.type === "nfc"
+    ? data?.participants.find(person => person.id === modal.id)
+    : null;
   const dialogTitle = modal?.type === "participant" ? modal.value ? "編輯人員" : "新增人員"
     : modal?.type === "profile" ? "個人檔案"
+    : modal?.type === "nfc" ? "寫入 NFC 小卡"
     : modal?.type === "group" ? modal.value ? "編輯組別" : "新增組別"
     : modal?.type === "deleteGroup" ? "移除組別草稿"
     : modal?.type === "publish" ? "發布這一版分組"
@@ -281,7 +286,26 @@ export default function AdminConsole() {
     {modal && data && <Dialog title={dialogTitle} onClose={closeModal} busy={busy} wide={modal.type === "settings"}>
       {modalError && <p className="ad-message ad-message-error" role="alert">{modalError}</p>}
       {modal.type === "participant" && <ParticipantEditor person={modal.value} data={data} busy={busy} onSave={payload => action(payload)} onClose={closeModal} />}
-      {modal.type === "profile" && (viewedPerson ? <ProfileView person={viewedPerson} groupName={groupName(viewedPerson.groupId)} busy={busy || !!linkPending} onCopy={() => void copyPersonLink(viewedPerson)} onEdit={() => openModal({ type: "participant", value: viewedPerson })} /> : <p className="ad-muted">找不到這位人員，請關閉視窗並重新整理名單。</p>)}
+      {modal.type === "profile" && (viewedPerson ? <ProfileView person={viewedPerson} groupName={groupName(viewedPerson.groupId)} busy={busy || !!linkPending} onCopy={() => void copyPersonLink(viewedPerson)} onEdit={() => openModal({ type: "participant", value: viewedPerson })} onWriteNfc={() => openModal({ type: "nfc", id: viewedPerson.id })} /> : <p className="ad-muted">找不到這位人員，請關閉視窗並重新整理名單。</p>)}
+      {modal.type === "nfc" && (viewedPerson ? <>
+        <p className="ad-callout">
+          <strong>{viewedPerson.name}</strong> · {viewedPerson.house || "未填家別"}
+          {viewedPerson.householdNumber != null ? ` · 家內 ${viewedPerson.householdNumber} 號` : ""}
+        </p>
+        {viewedPerson.url && viewedPerson.linkActive
+          ? <NfcWriter url={viewedPerson.url} />
+          : viewedPerson.url
+            ? <p className="ad-inline-warning">這位人員的專屬連結已停用。</p>
+            : <>
+              <p className="ad-dialog-copy">先建立專屬連結。Android Chrome 可直接寫卡，iPhone 可複製網址到 NFC 寫卡 App。</p>
+              <button type="button" className="ad-button ad-button-primary" disabled={busy} onClick={() => void action({ action: "ensureParticipantLink", participantId: viewedPerson.id }, false)}>
+                {busy ? "正在建立…" : "建立專屬連結"}
+              </button>
+            </>}
+        <div className="ad-dialog-actions">
+          <button type="button" className="ad-button" disabled={busy} onClick={() => openModal({ type: "profile", id: viewedPerson.id })}>返回個人檔案</button>
+        </div>
+      </> : <p className="ad-muted">找不到這位人員，請關閉視窗並重新整理名單。</p>)}
       {modal.type === "group" && <><GroupEditor group={modal.value} busy={busy} onSave={payload => action(payload)} onClose={closeModal} />{modal.value && <button type="button" className="ad-button ad-button-small ad-button-quiet" disabled={busy} onClick={() => openModal({ type: "deleteGroup", value: modal.value! })}>移除這個組別</button>}</>}
       {modal.type === "deleteGroup" && <><p className="ad-dialog-copy">將移除「{modal.value.name}」的草稿。原組員會變成尚未分組，請重新安排後再發布。已發布的正式分組會保留到下次發布。</p><div className="ad-dialog-actions"><button type="button" className="ad-button" onClick={closeModal} disabled={busy}>保留組別</button><button type="button" className="ad-button ad-button-danger" disabled={busy} onClick={() => void action({ action: "deleteGroup", id: modal.value.id })}>{busy ? "正在移除…" : "確認移除組別"}</button></div></>}
       {modal.type === "publish" && <><p className="ad-dialog-copy">將目前的組別名稱、集合位置與成員安排，發布為正式版本。</p><div className="ad-summary-lines"><p><span>組別</span><strong>{data.groups.length} 組</strong></p><p><span>已安排</span><strong>{data.stats.grouped} 人</strong></p><p><span>尚未分組</span><strong>{data.participants.length - data.stats.grouped} 人</strong></p></div>{data.participants.length > data.stats.grouped && <p className="ad-inline-warning">請先完成人員分組，再發布。</p>}<p className="ad-muted">發布後，在上方切換為「活動中」，並開放分組揭曉。</p><div className="ad-dialog-actions"><button type="button" className="ad-button" onClick={closeModal} disabled={busy}>再檢查一下</button><button type="button" className="ad-button ad-button-primary" onClick={() => void action({ action: "publishGroups" })} disabled={busy || !data.participants.length || data.stats.grouped < data.participants.length}>{busy ? "正在發布…" : "確認發布"}</button></div></>}
@@ -301,7 +325,9 @@ function ManualCopyField({ value }: { value: string }) {
   useEffect(() => { input.current?.focus(); input.current?.select(); }, []);
   return <label className="ad-field"><span>完整專屬連結</span><textarea ref={input} className="ad-copy-fallback" readOnly value={value} rows={3} onFocus={event => event.target.select()} /></label>;
 }
-function ProfileView({ person, groupName, busy, onCopy, onEdit }: { person: Participant; groupName: string; busy: boolean; onCopy: () => void; onEdit: () => void }) {
+function ProfileView({ person, groupName, busy, onCopy, onEdit, onWriteNfc }: {
+  person: Participant; groupName: string; busy: boolean; onCopy: () => void; onEdit: () => void; onWriteNfc: () => void;
+}) {
   const profile = person.profile;
   const externalUrl = profile?.url ? externalProfileLink(profile.url) : null;
   return <div className="ad-profile-view">
@@ -312,7 +338,10 @@ function ProfileView({ person, groupName, busy, onCopy, onEdit }: { person: Part
       <div><dt>個人連結</dt><dd>{externalUrl ? <a href={externalUrl} target="_blank" rel="noopener noreferrer">{profile.url} ↗</a> : profile.url ? "連結格式不正確，請本人重新設定。" : "尚未填寫"}</dd></div>
     </dl> : <p className="ad-inline-warning">目前無法讀取個人檔案，請稍後重新整理再試。</p>}
     {person.url && !person.linkActive && <p className="ad-inline-warning">這位人員的專屬連結已停用。</p>}
-    <div className="ad-dialog-actions"><button type="button" className="ad-button ad-button-primary" disabled={busy || (!!person.url && !person.linkActive)} onClick={onCopy}>複製專屬連結</button></div>
+    <div className="ad-dialog-actions">
+      <button type="button" className="ad-button" disabled={busy || (!!person.url && !person.linkActive)} onClick={onWriteNfc}>寫入 NFC</button>
+      <button type="button" className="ad-button ad-button-primary" disabled={busy || (!!person.url && !person.linkActive)} onClick={onCopy}>複製專屬連結</button>
+    </div>
     <p className="ad-profile-footnote">此處顯示本人已儲存的個人檔案。人員資料與分組可由工作人員編輯。</p>
   </div>;
 }
@@ -321,7 +350,7 @@ function ParticipantEditor({ person, data, busy, onSave, onClose }: { person?: P
     event.preventDefault(); const form = new FormData(event.currentTarget);
     void onSave({ action: "saveParticipant", ...(person ? { id: person.id } : {}), name: String(form.get("name")).trim(), house: String(form.get("house")).trim(), householdNumber: form.get("householdNumber") ? Number(form.get("householdNumber")) : null, groupId: String(form.get("groupId")) || null });
   }
-  return <form onSubmit={submit}><div className="ad-form-grid"><Field label="姓名"><input name="name" autoComplete="off" maxLength={80} defaultValue={person?.name} required /></Field><Field label="家別"><input name="house" autoComplete="off" maxLength={80} defaultValue={person?.house} /></Field><Field label="家內編號" help="選填；同一家不可重複。"><input name="householdNumber" type="number" min="1" step="1" defaultValue={person?.householdNumber ?? ""} /></Field></div><Field label="指定組別"><select name="groupId" defaultValue={person?.groupId ?? ""}><option value="">稍後安排</option>{data.groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></Field><p className="ad-muted">專屬連結保持不變。分組調整會先儲存為草稿，發布後才會更新正式結果。</p><div className="ad-dialog-actions"><button className="ad-button" type="button" disabled={busy} onClick={onClose}>取消</button><button className="ad-button ad-button-primary" disabled={busy}>{busy ? "正在儲存…" : "儲存人員資料"}</button></div></form>;
+  return <form onSubmit={submit}><div className="ad-form-grid"><Field label="姓名"><input name="name" autoComplete="off" maxLength={80} defaultValue={person?.name} required /></Field><Field label="家別"><input name="house" autoComplete="off" maxLength={80} defaultValue={person?.house} /></Field><Field label="家內編號" help="選填正整數；有填時也需填寫家別，同一家不可重複。"><input name="householdNumber" type="number" min="1" step="1" defaultValue={person?.householdNumber ?? ""} /></Field></div><Field label="指定組別"><select name="groupId" defaultValue={person?.groupId ?? ""}><option value="">稍後安排</option>{data.groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></Field><p className="ad-muted">專屬連結保持不變。分組調整會先儲存為草稿，發布後才會更新正式結果。</p><div className="ad-dialog-actions"><button className="ad-button" type="button" disabled={busy} onClick={onClose}>取消</button><button className="ad-button ad-button-primary" disabled={busy}>{busy ? "正在儲存…" : "儲存人員資料"}</button></div></form>;
 }
 function GroupEditor({ group, busy, onSave, onClose }: { group?: Group; busy: boolean; onSave: (payload: AdminAction) => Promise<ActionResult | null>; onClose: () => void }) {
   function submit(event: FormEvent<HTMLFormElement>) {
