@@ -12,12 +12,12 @@ const compiled = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../com
 }).outputText;
 const exported = {};
 new Function('exports', 'require', compiled)(exported, require);
-const { NfcWriterSession, validateNfcUrl } = exported;
+const { NfcWriterSession, validateNfcUrl, useNfcSupport } = exported;
 const URL_VALUE = 'https://tzai-yeah-love-2026.lovely-bull-4753.chatgpt.site/t/' + 'a'.repeat(48);
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function fixture({ timeout = 30000, url = URL_VALUE, environment } = {}) {
-  const readers = [], states = [];
+  const readers = [], states = [], verifications = [];
   class Reader extends EventTarget {
     constructor() { super(); readers.push(this); this.writes = []; this.scans = []; }
     write(message, options) {
@@ -31,9 +31,10 @@ function fixture({ timeout = 30000, url = URL_VALUE, environment } = {}) {
       this.dispatchEvent(event);
     }
   }
-  const session = new NfcWriterSession(url, state => states.push(state), () => ({ secure: true, topLevel: true, Reader, ...environment }), timeout);
+  const session = new NfcWriterSession(url, state => states.push(state), () => ({ secure: true, topLevel: true, Reader, ...environment }), timeout,
+    (verified, verifiedUrl) => verifications.push({ verified, url: verifiedUrl }));
   session.activate();
-  return { readers, states, session };
+  return { readers, states, verifications, session };
 }
 function record(url = URL_VALUE, recordType = 'url') {
   const bytes = new TextEncoder().encode(url);
@@ -54,6 +55,20 @@ test('HTTPS, top-level and reader availability gates prevent any hardware call',
   }
   const invalid = fixture({ url: 'https://example.org/admin' }); invalid.session.start('verify');
   assert.equal(invalid.readers.length, 0); invalid.session.dispose();
+});
+
+test('support hook keeps server rendering unarmed and HTTP links explain the HTTPS requirement', () => {
+  const React = require('react');
+  const { renderToStaticMarkup } = require('react-dom/server');
+  function Probe() { const support = useNfcSupport(); return React.createElement('p', null, JSON.stringify(support)); }
+  const markup = renderToStaticMarkup(React.createElement(Probe));
+  assert.match(markup, /checking/); assert.match(markup, /ready&quot;:false/);
+  assert.throws(() => validateNfcUrl(URL_VALUE.replace('https:', 'http:')), /HTTPS/);
+  const insecure = fixture({ url: URL_VALUE.replace('https:', 'http:'), environment: { secure: false } });
+  insecure.session.start('write');
+  assert.match(insecure.states.at(-1).message, /HTTPS/);
+  assert.doesNotMatch(insecure.states.at(-1).message, /格式不正確/);
+  assert.equal(insecure.readers.length, 0); insecure.session.dispose();
 });
 
 test('write starts synchronously from the click, with exactly one URL and overwrite false', async () => {
@@ -101,6 +116,59 @@ test('scan resolution only means listening; an exact single URL record is requir
   const count = f.states.length; reader.read([record('https://example.org/')]); assert.equal(f.states.length, count); f.session.dispose();
 });
 
+test('batch readiness requires actual read-back and is revoked immediately on recheck, mismatch or stop', async () => {
+  const f = fixture();
+  assert.deepEqual(f.verifications, [{ verified: false, url: URL_VALUE }]);
+  f.session.start('write'); f.readers[0].resolveWrite(); await tick();
+  assert.ok(f.verifications.every(item => item.verified === false));
+  f.session.start('verify'); await tick();
+  assert.equal(f.verifications.at(-1).verified, false);
+  f.readers[1].read([record()]);
+  assert.deepEqual(f.verifications.at(-1), { verified: true, url: URL_VALUE });
+  f.session.start('verify');
+  assert.equal(f.verifications.at(-1).verified, false);
+  f.readers[2].read([record(URL_VALUE.replace(/a$/, 'b'))]);
+  assert.equal(f.verifications.at(-1).verified, false);
+  f.session.start('verify'); f.readers[3].read([record()]);
+  assert.equal(f.verifications.at(-1).verified, true);
+  // Visibility/pagehide also call cancel after scanning has already finished.
+  f.session.cancel('已離開畫面');
+  assert.equal(f.states.at(-1).status, 'cancelled');
+  assert.equal(f.verifications.at(-1).verified, false);
+  f.session.start('verify'); f.readers[4].read([record()]);
+  assert.equal(f.verifications.at(-1).verified, true);
+  f.session.dispose();
+  assert.equal(f.verifications.at(-1).verified, false);
+});
+
+test('abandoned operations cannot restore readiness and callbacks identify the exact participant URL', async () => {
+  const old = fixture(); old.session.start('verify');
+  old.session.cancel();
+  const oldCount = old.verifications.length;
+  old.readers[0].read([record()]);
+  assert.equal(old.verifications.length, oldCount);
+  const nextUrl = URL_VALUE.replace(/a$/, 'b');
+  const next = fixture({ url: nextUrl }); next.session.start('verify'); next.readers[0].read([record(nextUrl)]);
+  assert.deepEqual(next.verifications.at(-1), { verified: true, url: nextUrl });
+  old.session.dispose();
+  assert.deepEqual(old.verifications.at(-1), { verified: false, url: URL_VALUE });
+  assert.deepEqual(next.verifications.at(-1), { verified: true, url: nextUrl });
+  next.session.dispose();
+});
+
+test('updating the parent listener does not restart or revoke an already verified session', () => {
+  const f = fixture(); f.session.start('verify'); f.readers[0].read([record()]);
+  const replacement = [];
+  f.session.setVerificationListener((verified, url) => replacement.push({ verified, url }));
+  assert.equal(f.states.at(-1).status, 'verified');
+  assert.deepEqual(replacement, []); assert.equal(f.readers.length, 1);
+  f.session.start('verify');
+  assert.deepEqual(replacement, [{ verified: false, url: URL_VALUE }]);
+  f.readers[1].read([record()]);
+  assert.deepEqual(replacement.at(-1), { verified: true, url: URL_VALUE });
+  f.session.dispose(); assert.equal(replacement.at(-1).verified, false);
+});
+
 test('wrong, additional, text-only, empty or invalid UTF-8 records never verify', () => {
   for (const records of [[record(URL_VALUE.replace(/a$/, 'b'))], [record(), record()], [record(URL_VALUE, 'text')], [], [{ recordType: 'url', data: new DataView(new Uint8Array([0xff]).buffer) }]]) {
     const f = fixture(); f.session.start('verify'); f.readers[0].read(records);
@@ -120,6 +188,7 @@ test('timeout aborts both write and verify, and late resolution cannot overwrite
     const f = fixture({ timeout: 10 }); f.session.start(kind); const reader = f.readers[0];
     await new Promise(resolve => setTimeout(resolve, 25));
     assert.equal(f.states.at(-1).status, 'timeout');
+    assert.equal(f.verifications.at(-1).verified, false);
     assert.equal((kind === 'write' ? reader.writes[0].options : reader.scans[0]).signal.aborted, true);
     if (kind === 'write') reader.resolveWrite(); else reader.read([record()]);
     await tick(); assert.equal(f.states.at(-1).status, 'timeout'); f.session.dispose();

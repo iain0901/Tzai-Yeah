@@ -16,6 +16,11 @@ export type NfcWriterState = {
   message: string;
   written?: boolean;
 };
+export type NfcWriterProps = {
+  url: string;
+  /** Read-back readiness for this exact URL; writing alone never grants readiness. */
+  onVerificationChange?: (verified: boolean, url: string) => void;
+};
 type Operation = {
   kind: "write" | "verify";
   reader: NfcReader;
@@ -35,7 +40,10 @@ const CAPABILITY_MESSAGES: Record<Capability, string> = {
 };
 
 export function validateNfcUrl(value: string): string {
-  const url = new URL(value);
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new Error("專屬連結格式不正確，請關閉視窗後重新開啟這位參加者的資料。"); }
+  if (url.protocol === "http:") throw new Error("NFC 寫卡需要 HTTPS 專屬連結。請先以 HTTPS 開啟正式後台，再重新取得連結。");
   if (value !== value.trim() || url.protocol !== "https:" || url.username || url.password ||
     !/^\/t\/[a-f0-9]{48}$/.test(url.pathname) || url.search || url.hash || url.href !== value) {
     throw new Error("專屬連結格式不正確，請關閉視窗後重新開啟這位參加者的資料。");
@@ -57,6 +65,10 @@ function capability(environment: NfcEnvironment): Capability {
 const subscribeCapability = () => () => {};
 const getCapability = () => capability(browserEnvironment());
 const serverCapability = (): Capability => "checking";
+export function useNfcSupport(): { capability: Capability; ready: boolean; message: string } {
+  const current = useSyncExternalStore(subscribeCapability, getCapability, serverCapability);
+  return { capability: current, ready: current === "ready", message: CAPABILITY_MESSAGES[current] };
+}
 
 function failureMessage(error: unknown, kind: Operation["kind"]): string {
   const name = error && typeof error === "object" && "name" in error ? String(error.name) : "";
@@ -73,16 +85,26 @@ function failureMessage(error: unknown, kind: Operation["kind"]): string {
 export class NfcWriterSession {
   private active = false;
   private written = false;
+  private verified = false;
   private operation: Operation | null = null;
   constructor(
     private readonly url: string,
     private readonly publish: (state: NfcWriterState) => void,
     private readonly environment: () => NfcEnvironment = browserEnvironment,
     private readonly timeoutMs = 30000,
+    private onVerificationChange?: NfcWriterProps["onVerificationChange"],
   ) {}
-  activate() { this.active = true; }
-  dispose() { this.active = false; this.clear(); }
-  private emit(state: NfcWriterState) { this.publish({ ...state, written: this.written }); }
+  setVerificationListener(listener: NfcWriterProps["onVerificationChange"]) { this.onVerificationChange = listener; }
+  activate() { this.active = true; this.setVerified(false); }
+  dispose() { this.active = false; this.clear(); this.setVerified(false); }
+  private setVerified(verified: boolean) {
+    this.verified = verified;
+    this.onVerificationChange?.(verified, this.url);
+  }
+  private emit(state: NfcWriterState) {
+    this.setVerified(state.status === "verified");
+    this.publish({ ...state, written: this.written });
+  }
   private clear() {
     const operation = this.operation;
     this.operation = null;
@@ -98,16 +120,16 @@ export class NfcWriterSession {
     this.clear(); this.emit(state);
   }
   cancel(message = "已停止等待。若剛才已貼近卡片，請按「驗證卡片」確認內容。") {
-    if (!this.active || !this.operation) return;
+    if (!this.active || (!this.operation && !this.verified)) return;
     this.clear(); this.emit({ status: "cancelled", message });
   }
   start(kind: Operation["kind"]) {
     if (!this.active || this.operation || (kind === "write" && this.written)) return;
-    let url: string;
-    try { url = validateNfcUrl(this.url); }
-    catch { this.emit({ status: "error", message: "專屬連結格式不正確，請關閉視窗後重新開啟這位參加者的資料。" }); return; }
     const environment = this.environment(), support = capability(environment);
     if (support !== "ready" || !environment.Reader) { this.emit({ status: "error", message: CAPABILITY_MESSAGES[support] }); return; }
+    let url: string;
+    try { url = validateNfcUrl(this.url); }
+    catch (error) { this.emit({ status: "error", message: error instanceof Error ? error.message : "專屬連結格式不正確，請關閉視窗後重新開啟這位參加者的資料。" }); return; }
     let reader: NfcReader;
     try { reader = new environment.Reader(); }
     catch (error) { this.emit({ status: "error", message: failureMessage(error, kind) }); return; }
@@ -147,14 +169,16 @@ export class NfcWriterSession {
   }
 }
 
-export default function NfcWriter({ url }: { url: string }) {
-  return <NfcWriterControls key={url} url={url} />;
+export default function NfcWriter({ url, onVerificationChange }: NfcWriterProps) {
+  return <NfcWriterControls key={url} url={url} onVerificationChange={onVerificationChange} />;
 }
 
-function NfcWriterControls({ url }: { url: string }) {
-  const support = useSyncExternalStore(subscribeCapability, getCapability, serverCapability);
+function NfcWriterControls({ url, onVerificationChange }: NfcWriterProps) {
+  const { capability: support } = useNfcSupport();
   const [state, setState] = useState<NfcWriterState>(INITIAL);
   const [session] = useState(() => new NfcWriterSession(url, setState));
+  // Updating the parent callback must never restart a scan or clear verification.
+  useEffect(() => { session.setVerificationListener(onVerificationChange); }, [session, onVerificationChange]);
   useEffect(() => {
     session.activate();
     const pause = () => { if (document.visibilityState === "hidden") session.cancel("已離開畫面，NFC 等候已停止。回來後請重新驗證卡片。"); };
@@ -162,11 +186,12 @@ function NfcWriterControls({ url }: { url: string }) {
     document.addEventListener("visibilitychange", pause); window.addEventListener("pagehide", leave);
     return () => { document.removeEventListener("visibilitychange", pause); window.removeEventListener("pagehide", leave); session.dispose(); };
   }, [session]);
-  let valid = true;
-  try { validateNfcUrl(url); } catch { valid = false; }
+  let urlError = "";
+  try { validateNfcUrl(url); } catch (error) { urlError = error instanceof Error ? error.message : "專屬連結格式不正確，請重新開啟這位參加者的資料。"; }
+  const valid = !urlError;
   const busy = state.status === "writing" || state.status === "verifying";
   const ready = support === "ready" && valid;
-  const message = support !== "ready" ? CAPABILITY_MESSAGES[support] : !valid ? "專屬連結格式不正確，請重新開啟這位參加者的資料。" : state.message;
+  const message = support !== "ready" ? CAPABILITY_MESSAGES[support] : urlError || state.message;
   return <section className="ad-section" aria-label="寫入與驗證 NFC 卡片">
     <h3>寫入這位參加者的空白卡</h3>
     <p className="ad-muted">一次只靠近一張卡。寫入會保留卡片可再次寫入的狀態；已有內容的卡片不會被覆寫。</p>

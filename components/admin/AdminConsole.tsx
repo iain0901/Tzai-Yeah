@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import type { AdminAction, AdminData, ActionResult, ApiError, EventConfig, EventPhase, Group, Participant } from "@/lib/contracts";
 import { prepareImport, type ImportPreview } from "./csv";
 import NfcWriter from "./NfcWriter";
+import NfcBatchWriter from "./NfcBatchWriter";
 
 type Tab = "participants" | "groups";
 type ModalState =
   | { type: "participant"; value?: Participant }
   | { type: "profile"; id: string }
   | { type: "nfc"; id: string }
+  | { type: "nfcBatch" }
   | { type: "group"; value?: Group }
   | { type: "deleteGroup"; value: Group }
   | { type: "publish" }
@@ -169,6 +171,18 @@ export default function AdminConsole() {
       else if (result) setError("連結建立完成，但尚未取得網址。請重新整理後再複製。");
     } finally { setLinkPending(null); }
   }
+  async function ensureBatchUrl(id: string): Promise<string | null> {
+    const person = data?.participants.find(item => item.id === id);
+    if (!person || (person.url && !person.linkActive)) return null;
+    const url = person.url || (await action({ action: "ensureParticipantLink", participantId: id }, false))?.url;
+    if (!url) return null;
+    try {
+      return sameSiteLink(url);
+    } catch {
+      setModalError("這位人員的專屬連結格式不正確。");
+      return null;
+    }
+  }
   async function exportCSV(kind: "participants" | "offline") {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true); setError("");
@@ -202,6 +216,7 @@ export default function AdminConsole() {
   const dialogTitle = modal?.type === "participant" ? modal.value ? "編輯人員" : "新增人員"
     : modal?.type === "profile" ? "個人檔案"
     : modal?.type === "nfc" ? "寫入 NFC 小卡"
+    : modal?.type === "nfcBatch" ? "連續寫卡"
     : modal?.type === "group" ? modal.value ? "編輯組別" : "新增組別"
     : modal?.type === "deleteGroup" ? "移除組別草稿"
     : modal?.type === "publish" ? "發布這一版分組"
@@ -244,7 +259,11 @@ export default function AdminConsole() {
               <label className="ad-search"><span className="ad-sr-only">搜尋人員</span><input type="search" placeholder="搜尋姓名、家別、家內編號或組別" value={search} onChange={event => setSearch(event.target.value)} /></label>
               <label className="ad-filter"><span className="ad-sr-only">依組別篩選人員</span><select value={groupFilter} onChange={event => setGroupFilter(event.target.value)}><option value="">所有組別</option><option value="unassigned">尚未分組</option>{data.groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
             </div>
-            <div className="ad-actions"><button type="button" className="ad-button" disabled={busy} onClick={() => openModal({ type: "import" })}>匯入名單</button><button type="button" className="ad-button ad-button-primary" disabled={busy} onClick={() => openModal({ type: "participant" })}>新增人員</button></div>
+            <div className="ad-actions">
+              <button type="button" className="ad-button" disabled={busy || !!linkPending || !data.participants.length} onClick={() => openModal({ type: "nfcBatch" })}>連續寫卡</button>
+              <button type="button" className="ad-button" disabled={busy} onClick={() => openModal({ type: "import" })}>匯入名單</button>
+              <button type="button" className="ad-button ad-button-primary" disabled={busy} onClick={() => openModal({ type: "participant" })}>新增人員</button>
+            </div>
           </div>
           <div className="ad-list-caption"><span>共 {data.participants.length} 人 · {data.stats.grouped} 人已分組</span><button type="button" className="ad-button ad-button-small ad-button-quiet" disabled={busy || !data.participants.length} onClick={() => void exportCSV("participants")}>匯出人員名單 ↓</button></div>
           {!data.participants.length ? <Empty title="把大家的名字放進來" text="新增一位或匯入整份名單，專屬連結會在需要時自動準備好。"><button type="button" className="ad-button" onClick={() => openModal({ type: "import" })}>匯入人員名單</button></Empty>
@@ -286,6 +305,7 @@ export default function AdminConsole() {
     {modal && data && <Dialog title={dialogTitle} onClose={closeModal} busy={busy} wide={modal.type === "settings"}>
       {modalError && <p className="ad-message ad-message-error" role="alert">{modalError}</p>}
       {modal.type === "participant" && <ParticipantEditor person={modal.value} data={data} busy={busy} onSave={payload => action(payload)} onClose={closeModal} />}
+      {modal.type === "nfcBatch" && <NfcBatchWriter participants={data.participants} ensureUrl={ensureBatchUrl} />}
       {modal.type === "profile" && (viewedPerson ? <ProfileView person={viewedPerson} groupName={groupName(viewedPerson.groupId)} busy={busy || !!linkPending} onCopy={() => void copyPersonLink(viewedPerson)} onEdit={() => openModal({ type: "participant", value: viewedPerson })} onWriteNfc={() => openModal({ type: "nfc", id: viewedPerson.id })} /> : <p className="ad-muted">找不到這位人員，請關閉視窗並重新整理名單。</p>)}
       {modal.type === "nfc" && (viewedPerson ? <>
         <p className="ad-callout">
