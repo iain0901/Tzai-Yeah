@@ -1,16 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { prepareTickets } from '../components/admin/tickets.mjs';
-const person = { name: '王小明', house: '一家', householdNumber: 1, url: '/t/' + 'a'.repeat(48), linkActive: true };
-test('formats real participant ticket and preserves exact link', () => {
- const result = prepareTickets([person], 'https://example.test');
- assert.equal(result[0].number, '10101');
- assert.equal(result[0].url, 'https://example.test/t/' + 'a'.repeat(48));
-});
-test('rejects the entire batch when link is absent or inactive', () => {
- for (const bad of [{...person,householdNumber:2,url:null}, {...person,householdNumber:2,linkActive:false}]) assert.throws(() => prepareTickets([person,bad], 'https://example.test'), /連結/);
-});
-test('rejects unrepresentable or duplicate ticket numbers and untrusted links', () => {
- for (const bad of [{...person,house:'其他'}, {...person,householdNumber:100}, {...person,url:'https://evil.test/t/'+'a'.repeat(48)}]) assert.throws(() => prepareTickets([bad], 'https://example.test'));
- assert.throws(() => prepareTickets([person,person], 'https://example.test'), /重複/);
-});
+const origin = 'https://example.test', token = 'a'.repeat(48);
+const person = { id:'p1', cardId:'c1', name:'王小明', house:'一家', householdNumber:1, url:'/t/'+token, linkActive:true };
+const card = { id:'c1', participantId:'p1', serial:'10101', active:true, token, url:origin+'/t/'+token };
+const prepare = (people, cards=[card]) => prepareTickets(people, origin, cards);
+test('prints verified actual system number and exact link', () => assert.deepEqual(prepare([person]), [{name:'王小明',number:'10101',url:card.url}]));
+test('rejects invalid links', () => { for (const url of [null,'https://evil.test/t/'+token,'/t/'+token+'?x=1','/t/'+token+'#x']) assert.throws(() => prepare([{...person,url}])); assert.throws(() => prepare([{...person,linkActive:false}])); });
+test('rejects invalid or duplicated numbers', () => { for (const bad of [{...person,house:'其他'}, {...person,householdNumber:100}, {...person,householdNumber:2}]) assert.throws(() => prepare([bad])); assert.throws(() => prepare([person,person]), /重複/); });
+test('rejects mismatched card, owner, token, link or active status', () => { for (const bad of [{...card,serial:'10102'}, {...card,participantId:'p2'}, {...card,active:false}, {...card,token:'b'.repeat(48)}, {...card,url:origin+'/t/'+'b'.repeat(48)}]) assert.throws(() => prepare([person],[bad]), /不一致/); assert.throws(() => prepare([person],[]), /不一致/); });
+test('rejects unsafe names and entire batch', () => { for (const name of ['', 'x'.repeat(31), 'a\nb']) assert.throws(() => prepare([{...person,name}])); assert.throws(() => prepare([person,{...person,id:'p2',householdNumber:2,url:null}]), /連結/); });

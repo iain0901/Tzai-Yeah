@@ -195,12 +195,7 @@ export default function AdminConsole() {
       const response = await fetch("/api/admin", { cache: "no-store" });
       if (!response.ok) throw new Error("無法驗證後台權限或載入最新名單，請重新登入後再試。");
       const latest = await response.json() as AdminData;
-      const tickets = prepareTickets(latest.participants, window.location.origin);
-      const serials = new Map(latest.cards.map(card => [card.id, card.serial]));
-      for (const person of latest.participants) {
-        const only = prepareTickets([person], window.location.origin)[0];
-        if (!person.cardId || serials.get(person.cardId) !== only.number) throw new Error(`${person.name}：系統卡號與家別編號不一致，請先確認，不會列印。`);
-      }
+      const tickets = prepareTickets(latest.participants, window.location.origin, latest.cards);
       popup.document.body.replaceChildren();
       renderTicketPreview(popup, tickets);
     } catch (reason) {

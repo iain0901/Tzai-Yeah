@@ -10,7 +10,7 @@ function houseNumber(house) {
   const m = text.match(/^([一二兩三四五六七八九])?十([一二兩三四五六七八九])?$/);
   return m ? (m[1] ? digit[m[1]] : 1) * 10 + (m[2] ? digit[m[2]] : 0) : null;
 }
-export function prepareTickets(people, origin) {
+export function prepareTickets(people, origin, cards) {
   if (!people.length) throw new Error('名單為空，沒有可列印的票券。');
   const numbers = new Set();
   return people.map(person => {
@@ -22,6 +22,9 @@ export function prepareTickets(people, origin) {
     let url;
     try { url = new URL(person.url, origin); } catch { throw new Error(`${person.name}：缺少或無效的專屬連結。`); }
     if (!person.url || !person.linkActive || url.origin !== origin || !/^https?:$/.test(url.protocol) || !/^\/t\/[a-f0-9]{48}$/.test(url.pathname) || url.search || url.hash || url.username || url.password) throw new Error(`${person.name}：專屬連結缺少、停用或格式不正確，請先確認；未產生任何票券。`);
-    return { name: person.name, number, url: url.href };
+    const card = cards.find(candidate => candidate.id === person.cardId);
+    if (!person.id || !card || card.participantId !== person.id || !card.active || card.serial !== number || card.url !== url.href || card.token !== url.pathname.slice(3)) throw new Error(`${person.name}：系統卡號、綁定或專屬連結不一致，請先確認，不會列印。`);
+    if (person.name.trim().length > 30 || /[\r\n]/.test(person.name)) throw new Error(`${person.name}：姓名過長或包含換行，無法安全列印。`);
+    return { name: person.name.trim(), number: card.serial, url: url.href };
   }).sort((a,b) => a.number.localeCompare(b.number));
 }

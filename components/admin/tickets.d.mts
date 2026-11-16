@@ -1,3 +1,3 @@
-import type { Participant } from "@/lib/contracts";
+import type { Participant, Card } from "@/lib/contracts";
 export type Ticket = { name: string; number: string; url: string };
-export function prepareTickets(people: readonly Participant[], origin: string): Ticket[];
+export function prepareTickets(people: readonly Participant[], origin: string, cards: readonly Card[]): Ticket[];
