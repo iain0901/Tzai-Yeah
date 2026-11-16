@@ -189,14 +189,16 @@ export default function AdminConsole() {
       return null;
     }
   }
-  async function printAllTickets() {
+  async function printAllTickets(testOnly = false) {
     if (busyRef.current) return;
     busyRef.current = true; stopPrint.current = false; setBusy(true); setPrinting(true); setError(""); setPrintProgress("正在檢查名單與印表機…");
     try {
       const response = await fetch("/api/admin", { cache: "no-store" });
       if (!response.ok) throw new Error("無法讀取最新名單或後台權限，請重新登入。");
       const latest = await response.json() as AdminData;
-      const tickets = prepareTickets(latest.participants, window.location.origin, latest.cards);
+      const allTickets = prepareTickets(latest.participants, window.location.origin, latest.cards);
+      const tickets = testOnly ? allTickets.slice(0, 2) : allTickets;
+      if (testOnly && tickets.length !== 2) throw new Error("至少需要兩位參加者才能測試列印兩張。");
       if (!navigator.locks) throw new Error("瀏覽器不支援安全列印鎖定，請使用最新版 Chrome。");
       const result = await navigator.locks.request("tzai-q901c-ticket-print", { ifAvailable: true }, async lock => {
         if (!lock) throw new Error("另一個分頁正在列印票券，請勿重複送印。");
@@ -300,6 +302,7 @@ export default function AdminConsole() {
               <label className="ad-filter"><span className="ad-sr-only">依組別篩選人員</span><select value={groupFilter} onChange={event => setGroupFilter(event.target.value)}><option value="">所有組別</option><option value="unassigned">尚未分組</option>{data.groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
             </div>
             <div className="ad-actions">
+              <button type="button" className="ad-button ad-button-primary" disabled={busy || data.participants.length < 2} onClick={() => void printAllTickets(true)}>測試列印前 2 張並剪切</button>
               <button type="button" className="ad-button" disabled={busy || !data.participants.length} onClick={() => void printAllTickets()}>一鍵列印全部並剪切</button>
               <button type="button" className="ad-button" disabled={busy || !data.participants.length} onClick={() => void previewAllTickets()}>票券預覽</button>
               {printing && <button type="button" className="ad-button" onClick={() => { stopPrint.current = true; }}>停止後續列印</button>}

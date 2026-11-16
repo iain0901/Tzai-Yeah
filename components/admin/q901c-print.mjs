@@ -1,5 +1,5 @@
 import qrcode from '../../vendor/qrcode-generator/qrcode.mjs';
-const AGENT = 'http://127.0.0.1:9537';
+const AGENT = 'http://127.0.0.1:9538';
 export function drawTicket(ticket, documentObject = document) {
   const c = documentObject.createElement('canvas'); c.width = 384; c.height = 730;
   const x = c.getContext('2d'); if (!x) throw new Error('無法產生票券圖像。');
@@ -21,8 +21,8 @@ export function drawTicket(ticket, documentObject = document) {
 export async function printTickets(tickets, { fetcher=fetch, render=drawTicket, shouldStop=()=>false, onProgress=()=>{} }={}) {
   if(!Array.isArray(tickets)||!tickets.length) throw new Error('沒有可列印的票券。');
   let health; try { const r=await fetcher(AGENT+'/health',{cache:'no-store'}); if(!r.ok) throw Error(); health=await r.json(); }
-  catch { throw new Error('無法連接這台電腦的 WMS 列印代理，請先啟動。'); }
-  if(!health.ok||!health.sdk_ready||health.active_profile?.active!=='q901c') throw new Error('請在 WMS 列印設定選擇 Q901C，並確認印表機已連線。');
+  catch { throw new Error('無法連接舞會專用列印代理，請在連接 Q901C 的 Windows 電腦啟動新版代理。'); }
+  if(!health.ok||!health.sdk_ready||health.service!=='tzai-q901c'||health.version!==1) throw new Error('舞會專用列印代理尚未就緒，請確認 Q901C 已連線。');
   let complete=0;
   for(const ticket of tickets) {
     if(shouldStop()) return {complete,total:tickets.length,stopped:true};
@@ -32,7 +32,7 @@ export async function printTickets(tickets, { fetcher=fetch, render=drawTicket, 
     try {
       const r=await fetcher(AGENT+'/print-image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image_base64:image,port:'USB,',copies:1,cut_distance:40,name:'舞會票券',barcode:''})});
       let value;try{value=await r.json()}catch{throw Error('invalid')}
-      if(!r.ok||!value.ok||value.active_profile!=='q901c')throw Error('failed');
+      if(!r.ok||!value.ok||value.device!=='q901c'||value.cut_requested!==true)throw Error('failed');
     } catch { throw new Error(`已確認 ${complete}/${tickets.length} 張；卡號 ${ticket.number} 的列印或切紙狀態不確定，請先檢查實體票券，勿直接重印全部。`); }
     complete++; onProgress({complete,total:tickets.length,current:null});
   }
