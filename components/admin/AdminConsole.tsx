@@ -7,6 +7,7 @@ import NfcWriter from "./NfcWriter";
 import NfcBatchWriter from "./NfcBatchWriter";
 import { prepareTickets } from "./tickets.mjs";
 import { renderTicketPreview } from "./ticketPreview";
+import { printTickets } from "./q901c-print.mjs";
 
 type Tab = "participants" | "groups";
 type ModalState =
@@ -98,6 +99,9 @@ export default function AdminConsole() {
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [importFile, setImportFile] = useState("");
   const busyRef = useRef(false);
+  const stopPrint = useRef(false);
+  const [printing, setPrinting] = useState(false);
+  const [printProgress, setPrintProgress] = useState("");
 
   const load = useCallback(() => fetch("/api/admin", { cache: "no-store" }).then(async response => {
     const result = await response.json() as AdminData | ApiError;
@@ -184,6 +188,23 @@ export default function AdminConsole() {
       setModalError("這位人員的專屬連結格式不正確。");
       return null;
     }
+  }
+  async function printAllTickets() {
+    if (busyRef.current) return;
+    busyRef.current = true; stopPrint.current = false; setBusy(true); setPrinting(true); setError(""); setPrintProgress("正在檢查名單與印表機…");
+    try {
+      const response = await fetch("/api/admin", { cache: "no-store" });
+      if (!response.ok) throw new Error("無法讀取最新名單或後台權限，請重新登入。");
+      const latest = await response.json() as AdminData;
+      const tickets = prepareTickets(latest.participants, window.location.origin, latest.cards);
+      if (!navigator.locks) throw new Error("瀏覽器不支援安全列印鎖定，請使用最新版 Chrome。");
+      const result = await navigator.locks.request("tzai-q901c-ticket-print", { ifAvailable: true }, async lock => {
+        if (!lock) throw new Error("另一個分頁正在列印票券，請勿重複送印。");
+        return printTickets(tickets, { shouldStop: () => stopPrint.current, onProgress: p => setPrintProgress(`代理已回報 ${p.complete} / ${p.total} 張${p.current ? `，正在送印 ${p.current}` : ""}`) });
+      });
+      setPrintProgress(result.stopped ? `已停止，代理回報 ${result.complete} / ${result.total} 張。` : `代理已回報 ${result.complete} 張送印完成。`);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "列印失敗，請先確認紙本狀態。"); }
+    finally { busyRef.current = false; setBusy(false); setPrinting(false); }
   }
   async function previewAllTickets() {
     if (busyRef.current) return;
@@ -279,7 +300,10 @@ export default function AdminConsole() {
               <label className="ad-filter"><span className="ad-sr-only">依組別篩選人員</span><select value={groupFilter} onChange={event => setGroupFilter(event.target.value)}><option value="">所有組別</option><option value="unassigned">尚未分組</option>{data.groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
             </div>
             <div className="ad-actions">
-              <button type="button" className="ad-button" disabled={busy || !data.participants.length} onClick={() => void previewAllTickets()}>列印全部票券</button>
+              <button type="button" className="ad-button" disabled={busy || !data.participants.length} onClick={() => void printAllTickets()}>一鍵列印全部並剪切</button>
+              <button type="button" className="ad-button" disabled={busy || !data.participants.length} onClick={() => void previewAllTickets()}>票券預覽</button>
+              {printing && <button type="button" className="ad-button" onClick={() => { stopPrint.current = true; }}>停止後續列印</button>}
+              {printProgress && <span role="status">{printProgress}</span>}
               <button type="button" className="ad-button" disabled={busy || !!linkPending || !data.participants.length} onClick={() => openModal({ type: "nfcBatch" })}>連續寫卡</button>
               <button type="button" className="ad-button" disabled={busy} onClick={() => openModal({ type: "import" })}>匯入名單</button>
               <button type="button" className="ad-button ad-button-primary" disabled={busy} onClick={() => openModal({ type: "participant" })}>新增人員</button>
