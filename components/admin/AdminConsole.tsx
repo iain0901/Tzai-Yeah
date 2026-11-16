@@ -5,6 +5,8 @@ import type { AdminAction, AdminData, ActionResult, ApiError, EventConfig, Event
 import { prepareImport, type ImportPreview } from "./csv";
 import NfcWriter from "./NfcWriter";
 import NfcBatchWriter from "./NfcBatchWriter";
+import { prepareTickets } from "./tickets.mjs";
+import { renderTicketPreview } from "./ticketPreview";
 
 type Tab = "participants" | "groups";
 type ModalState =
@@ -183,6 +185,28 @@ export default function AdminConsole() {
       return null;
     }
   }
+  async function previewAllTickets() {
+    if (busyRef.current) return;
+    const popup = window.open("", "_blank");
+    if (!popup) { setError("瀏覽器封鎖了預覽視窗，請允許彈出視窗後重試。"); return; }
+    popup.document.body.textContent = "正在檢查全部人員資料…";
+    busyRef.current = true; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/admin", { cache: "no-store" });
+      if (!response.ok) throw new Error("無法驗證後台權限或載入最新名單，請重新登入後再試。");
+      const latest = await response.json() as AdminData;
+      const tickets = prepareTickets(latest.participants, window.location.origin);
+      const serials = new Map(latest.cards.map(card => [card.id, card.serial]));
+      for (const person of latest.participants) {
+        const only = prepareTickets([person], window.location.origin)[0];
+        if (!person.cardId || serials.get(person.cardId) !== only.number) throw new Error(`${person.name}：系統卡號與家別編號不一致，請先確認，不會列印。`);
+      }
+      popup.document.body.replaceChildren();
+      renderTicketPreview(popup, tickets);
+    } catch (reason) {
+      popup.close(); setError(reason instanceof Error ? reason.message : "無法準備票券。");
+    } finally { busyRef.current = false; setBusy(false); }
+  }
   async function exportCSV(kind: "participants" | "offline") {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true); setError("");
@@ -260,6 +284,7 @@ export default function AdminConsole() {
               <label className="ad-filter"><span className="ad-sr-only">依組別篩選人員</span><select value={groupFilter} onChange={event => setGroupFilter(event.target.value)}><option value="">所有組別</option><option value="unassigned">尚未分組</option>{data.groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
             </div>
             <div className="ad-actions">
+              <button type="button" className="ad-button" disabled={busy || !data.participants.length} onClick={() => void previewAllTickets()}>列印全部票券</button>
               <button type="button" className="ad-button" disabled={busy || !!linkPending || !data.participants.length} onClick={() => openModal({ type: "nfcBatch" })}>連續寫卡</button>
               <button type="button" className="ad-button" disabled={busy} onClick={() => openModal({ type: "import" })}>匯入名單</button>
               <button type="button" className="ad-button ad-button-primary" disabled={busy} onClick={() => openModal({ type: "participant" })}>新增人員</button>
