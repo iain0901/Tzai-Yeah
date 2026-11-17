@@ -4,6 +4,7 @@ import { ArrowRight, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Cloc
 import type { EventConfig, EventPhase, PublicEventData } from "@/lib/contracts";
 import { DEFAULT_EVENT } from "@/lib/event-defaults";
 import { rememberedCard, rememberCard, forgetCard } from "@/lib/card-entry";
+import { startFirstInvitation } from "@/lib/first-invitation";
 import Afterglow from "./Afterglow";
 import SceneTransition from "./SceneTransition";
 import Modal from "./Modal";
@@ -51,6 +52,7 @@ function EventApp({ token, demo }: { token: string; demo?: EventPhase }) {
   const [revealed, setRevealed] = useState(false); const [revealAnimating, setRevealAnimating] = useState(false);
   const music = useChristmasMusic(video);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null); const request = useRef<AbortController | null>(null); const previousPhase = useRef<EventPhase | null>(null);
+  const firstInvitationChecked = useRef(false);
   const event = data?.event || DEFAULT_EVENT; const card = data?.card; const videoId = youtubeId(event.videoUrl);
   const finishReveal = useCallback(() => { if (revealTimer.current) clearTimeout(revealTimer.current); setRevealed(true); setRevealAnimating(false); try { localStorage.setItem(`tzai-revealed-${token || "demo"}-${event.publishedVersion}`, "1"); } catch {} }, [token, event.publishedVersion]);
   const closeIntro = useCallback(() => setIntro(false), []); const closeVideo = useCallback(() => setVideo(false), []); const closeEdit = useCallback(() => setEdit(false), []); const closeMenu = useCallback(() => setMenu(false), []); const closeReading = useCallback(() => setReading(null), []);
@@ -69,6 +71,16 @@ function EventApp({ token, demo }: { token: string; demo?: EventPhase }) {
   useEffect(() => { if (demo) return; const update = () => { if (document.visibilityState === "visible") void fetchEvent(true); }; const timer = setInterval(update, 15000); document.addEventListener("visibilitychange", update); window.addEventListener("online", update); return () => { clearInterval(timer); document.removeEventListener("visibilitychange", update); window.removeEventListener("online", update); }; }, [fetchEvent, demo]);
   useEffect(() => { if (data && previousPhase.current !== data.event.phase) { const first = previousPhase.current === null; previousPhase.current = data.event.phase; setDirection(1); if (first && new URLSearchParams(location.search).get("play") === "1") setScreen("game"); else if (screen !== "game" && !edit) setScreen("home"); if (!first) setPhaseNotice(data.event.phase === "live" ? "今晚的相遇，開始了。" : data.event.phase === "after" ? "這一晚，已經變成回憶。" : "下一個故事，正在準備。" ); } }, [data, screen, edit]);
   useEffect(() => { const start = setTimeout(() => { if (new URLSearchParams(location.search).get("edit") === "1" && token) { setEdit(true); setScreen("pass"); } }, 0); return () => clearTimeout(start); }, [token]);
+  useEffect(() => {
+    if (!data || loading || screen !== "home" || firstInvitationChecked.current) return;
+    const start = setTimeout(() => {
+      if (firstInvitationChecked.current) return;
+      firstInvitationChecked.current = true;
+      try { if (startFirstInvitation(window.localStorage, location.search, data.event.phase, !!demo)) setIntro(true); }
+      catch { if (!demo && data.event.phase === "before" && !new URLSearchParams(location.search).has("play") && !new URLSearchParams(location.search).has("edit")) setIntro(true); }
+    }, 0);
+    return () => clearTimeout(start);
+  }, [data, loading, screen, demo]);
   useEffect(() => { const media = matchMedia("(prefers-reduced-motion: reduce)"); const update = () => setMotion(!media.matches); update(); media.addEventListener("change", update); return () => media.removeEventListener("change", update); }, []);
   useEffect(() => { if (!motion || screen !== "home" || intro || video || menu || reading || edit) return; const timer = setInterval(() => setMessageIndex(v => (v + 1) % 3), 5000); return () => clearInterval(timer); }, [motion, screen, intro, video, menu, reading, edit]);
   useEffect(() => { const start = setTimeout(() => { if (!card?.group) { setRevealed(false); setRevealAnimating(false); return; } if (screen !== "home" || event.phase !== "live") return; try { if (localStorage.getItem(`tzai-revealed-${token || "demo"}-${event.publishedVersion}`) || !motion || matchMedia("(prefers-reduced-motion: reduce)").matches) { setRevealed(true); setRevealAnimating(false); return; } } catch { setRevealed(true); return; } setRevealed(false); setRevealAnimating(true); revealTimer.current = setTimeout(finishReveal, 1700); }, 0); return () => { clearTimeout(start); if (revealTimer.current) clearTimeout(revealTimer.current); }; }, [card?.group?.id, token, event.publishedVersion, finishReveal, screen, motion, event.phase]);
