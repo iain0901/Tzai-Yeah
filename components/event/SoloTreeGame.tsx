@@ -245,7 +245,7 @@ function SoloTreeSession({ token, onChange, active, animations }: { token: strin
           <div className={`stg-save-state ${state.retry ? "has-error" : ""}`} role="status">{state.retry ? <WifiOff size={12}/> : state.pending ? <LoaderCircle className="stg-spinner" size={12}/> : <Check size={12}/>}<span>{state.retry ? `${state.pending} 點星光等待重試` : state.pending ? `${state.pending} 點星光・${state.saving ? "儲存中" : "等待儲存"}` : "成長已儲存，下次回來繼續長大"}</span>{state.retry && <button onClick={() => void session.current?.flush()}>重試</button>}</div>
           {state.error && <p className="stg-error" role="alert">{state.error}</p>}
           <div className="stg-grow-actions"><button className={`stg-primary stg-shake-action ${motion.status === "listening" ? "is-listening" : ""}`} aria-pressed={motion.status === "listening"} onClick={() => motion.status === "listening" ? motion.stop() : void motion.start()}><span className="stg-phone-icon"><Smartphone size={21}/><i aria-hidden="true"/></span><span>{motionLabel}</span><span className="stg-shake-rhythm" aria-hidden="true"><i/><i/><i/><i/></span></button></div>
-          <p className="stg-motion-note">{(motion.status !== "idle" ? motion.message : state.notice || motion.message) || "輕輕左右搖動，讓星光慢慢長大。"}</p>
+          <p className="stg-motion-note" role="status">{(motion.status !== "idle" ? motion.message : state.notice || motion.message) || "輕輕左右搖動，讓星光慢慢長大。"}</p>
         </>}
       </div>
     </div>}

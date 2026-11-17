@@ -19,7 +19,7 @@ export interface TreeShakeState {
   anchorAt: number;
   lastShakeAt: number | null;
 }
-export const TREE_SHAKE_THRESHOLD = 6;
+export const TREE_SHAKE_THRESHOLD = 3;
 export const TREE_SHAKE_COOLDOWN_MS = 350;
 
 export function createTreeShakeState(): TreeShakeState {
@@ -44,7 +44,9 @@ export function detectTreeShake(previous: TreeShakeState, sample: TreeMotionSamp
   let state: TreeShakeState = { ...previous, lastAt: sample.at };
   if (elapsed > 400) state = { ...resetPeaks(state), gravity: null };
   const dt = Math.max(8, Math.min(120, elapsed));
-  let linear = net;
+  // Some browsers expose a zero-filled linear acceleration even when only the
+  // gravity-inclusive sensor actually updates. Use it as the fallback.
+  let linear = net && (!raw || Math.hypot(net.x, net.y, net.z) > 0.01) ? net : null;
   if (!linear && raw) {
     const magnitude = Math.hypot(raw.x, raw.y, raw.z);
     if (magnitude > 35 || magnitude < 1) return { state: resetPeaks(state), shake: false, usable: true };
@@ -73,7 +75,7 @@ export function detectTreeShake(previous: TreeShakeState, sample: TreeMotionSamp
   const filtered = state.horizontal + dt / (35 + dt) * ((dominant ? horizontal : 0) - state.horizontal);
   state.horizontal = filtered;
   if (sample.at - state.anchorAt > 750) state.anchor = 0;
-  const direction: Direction = filtered >= TREE_SHAKE_THRESHOLD ? 1 : filtered <= -TREE_SHAKE_THRESHOLD ? -1 : 0;
+  const direction: Direction = filtered >= TREE_SHAKE_THRESHOLD && horizontal >= TREE_SHAKE_THRESHOLD ? 1 : filtered <= -TREE_SHAKE_THRESHOLD && horizontal <= -TREE_SHAKE_THRESHOLD ? -1 : 0;
   if (!direction) {
     state.candidate = 0; state.candidateCount = 0;
     return { state, shake: false, usable: true };

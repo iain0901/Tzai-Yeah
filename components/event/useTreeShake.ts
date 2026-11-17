@@ -4,7 +4,7 @@ import { createTreeShakeState, detectTreeShake } from "@/lib/tree-shake";
 
 export type TreeShakeStatus = "idle" | "listening" | "denied" | "unavailable" | "paused";
 type MotionPermissionClass = typeof DeviceMotionEvent & { requestPermission?: () => Promise<"granted" | "denied"> };
-const IDLE_MESSAGE = "輕輕左右搖動手機，把星光送給小樹。";
+const IDLE_MESSAGE = "點選上方按鈕並允許動作感測，再左右搖動手機；也可以直接點小樹。";
 
 /**
  * Motion is optional. Call start directly from a click, never from an effect.
@@ -39,7 +39,11 @@ export function useTreeShake({ onShake, enabled }: { onShake: () => void; enable
     if (!enabled || !mounted.current || pending.current || active.current) return;
     if (document.visibilityState !== "visible") { setStatus("paused"); setMessage("回到遊戲後，就能繼續開啟搖動。"); return; }
     const motion = window.DeviceMotionEvent as MotionPermissionClass | undefined;
-    if (!window.isSecureContext || !motion) { setStatus("unavailable"); setMessage("這個裝置暫時聽不到搖動。小樹會在這裡陪你。"); return; }
+    if (!window.isSecureContext) { setStatus("unavailable"); setMessage("搖動需要 HTTPS 安全連線，請用瀏覽器開啟安全網址；也可以點小樹收集星光。"); return; }
+    if (!motion) { setStatus("unavailable"); setMessage("此瀏覽器不支援動作感測，請用 Safari 或 Chrome 開啟，或直接點小樹收集星光。"); return; }
+    const policy = (document as Document & { permissionsPolicy?: { allowsFeature: (name: string) => boolean }; featurePolicy?: { allowsFeature: (name: string) => boolean } }).permissionsPolicy
+      ?? (document as Document & { featurePolicy?: { allowsFeature: (name: string) => boolean } }).featurePolicy;
+    if (policy && !policy.allowsFeature("accelerometer")) { setStatus("unavailable"); setMessage("網頁的動作感測權限受到限制，請用瀏覽器直接開啟；也可以點小樹收集星光。"); return; }
     detach();
     const run = generation.current;
     pending.current = true;
@@ -50,7 +54,7 @@ export function useTreeShake({ onShake, enabled }: { onShake: () => void; enable
         setMessage("允許動作感測，就能把搖動變成星光。");
         const result = await permission;
         if (!mounted.current || generation.current !== run) return;
-        if (result !== "granted") { pending.current = false; setStatus("denied"); setMessage("搖動尚未開啟，沒關係，我們慢慢來。"); return; }
+        if (result !== "granted") { pending.current = false; setStatus("denied"); setMessage("動作感測未獲允許。請檢查瀏覽器或 iPhone 的動作與方向存取設定；也可以點小樹收集星光。"); return; }
       }
       if (!mounted.current || generation.current !== run || document.visibilityState !== "visible") return;
       pending.current = false; active.current = true;
@@ -78,11 +82,11 @@ export function useTreeShake({ onShake, enabled }: { onShake: () => void; enable
       setStatus("listening"); setMessage("正在聽你的節奏，試著輕輕左右搖動。");
       availabilityTimer.current = setTimeout(() => {
         if (!mounted.current || generation.current !== run || receivedData) return;
-        detach(); setStatus("unavailable"); setMessage("暫時沒有收到手機動作。小樹仍在這裡，等你的星光。");
+        detach(); setStatus("unavailable"); setMessage("沒有收到手機動作，請檢查瀏覽器感測權限，或改用 Safari／Chrome 開啟；也可以點小樹收集星光。");
       }, 3000);
     } catch {
       if (!mounted.current || generation.current !== run) return;
-      detach(); setStatus("denied"); setMessage("這次沒有連上手機動作，稍後可以再試一次。");
+      detach(); setStatus("denied"); setMessage("無法開啟手機動作，請檢查瀏覽器感測權限後再試，或直接點小樹收集星光。");
     }
   }, [enabled, detach]);
 

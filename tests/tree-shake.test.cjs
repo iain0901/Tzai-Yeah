@@ -64,3 +64,12 @@ test('out-of-order samples cannot update detector time or create hits', () => {
   const result=detectTreeShake(state,{at:80,...net(-10)});
   assert.equal(result.state,state); assert.equal(result.shake,false);
 });
+
+test("moderate horizontal shakes score on common 20 Hz sensors", () => {
+  const wave = []; for (let at=0; at<=5000; at+=50) wave.push({at,...net(5*Math.sin(at/1000*Math.PI*4))});
+  assert.ok(play(wave).hits.length >= 4, "moderate shakes should be detected");
+});
+test("gravity data is used when linear acceleration reports only zeroes", () => {
+  const wave=samples(5000,t=>({ ...gravity(t<320?0:10*Math.sin((t-320)/1000*Math.PI*4.8)), ...net(0) }));
+  assert.ok(play(wave).hits.length >= 5, "zero linear readings must not mask usable gravity data");
+});
