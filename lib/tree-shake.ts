@@ -25,19 +25,19 @@ export const TREE_SHAKE_COOLDOWN_MS = 350;
 export function createTreeShakeState(): TreeShakeState {
   return { gravity: null, horizontal: 0, lastAt: null, candidate: 0, candidateAt: 0, candidateCount: 0, anchor: 0, anchorAt: 0, lastShakeAt: null };
 }
-function vector(value?: MotionVector | null): Vector | null {
-  return value && typeof value.x === "number" && Number.isFinite(value.x)
-    && typeof value.y === "number" && Number.isFinite(value.y)
-    && typeof value.z === "number" && Number.isFinite(value.z)
-    ? { x: value.x, y: value.y, z: value.z } : null;
+function vector(value: MotionVector | null | undefined, axis: "x" | "y"): Vector | null {
+  const valid = (n: number | null): n is number => typeof n === "number" && Number.isFinite(n);
+  if (!value || !valid(value[axis])) return null;
+  return { x: valid(value.x) ? value.x : 0, y: valid(value.y) ? value.y : 0, z: valid(value.z) ? value.z : 0 };
 }
 function resetPeaks(state: TreeShakeState): TreeShakeState {
   return { ...state, horizontal: 0, candidate: 0, candidateCount: 0, anchor: 0 };
 }
 
 export function detectTreeShake(previous: TreeShakeState, sample: TreeMotionSample): { state: TreeShakeState; shake: boolean; usable: boolean } {
-  const net = vector(sample.acceleration);
-  const raw = vector(sample.includingGravity);
+  const axis = sample.horizontalAxis || "x";
+  const net = vector(sample.acceleration, axis);
+  const raw = vector(sample.includingGravity, axis);
   if (!Number.isFinite(sample.at) || (!net && !raw)) return { state: previous, shake: false, usable: false };
   if (previous.lastAt !== null && sample.at <= previous.lastAt) return { state: previous, shake: false, usable: true };
   const elapsed = previous.lastAt === null ? 16 : sample.at - previous.lastAt;
@@ -46,7 +46,7 @@ export function detectTreeShake(previous: TreeShakeState, sample: TreeMotionSamp
   const dt = Math.max(8, Math.min(120, elapsed));
   // Some browsers expose a zero-filled linear acceleration even when only the
   // gravity-inclusive sensor actually updates. Use it as the fallback.
-  let linear = net && (!raw || Math.hypot(net.x, net.y, net.z) > 0.01) ? net : null;
+  let linear = net && (!raw || Math.abs(net[axis]) > 0.01) ? net : null;
   if (!linear && raw) {
     const magnitude = Math.hypot(raw.x, raw.y, raw.z);
     if (magnitude > 35 || magnitude < 1) return { state: resetPeaks(state), shake: false, usable: true };
@@ -63,12 +63,11 @@ export function detectTreeShake(previous: TreeShakeState, sample: TreeMotionSamp
     state.gravity = gravity;
     // Pure tilting changes gravity's direction, but not its magnitude.
     // Require meaningful extra force before treating a raw sample as a shake.
-    linear = Math.abs(magnitude - 9.80665) < .85
+    linear = Math.abs(magnitude - 9.80665) < .85 && !!sample.includingGravity && [sample.includingGravity.x, sample.includingGravity.y, sample.includingGravity.z].every(n => typeof n === "number" && Number.isFinite(n))
       ? { x: 0, y: 0, z: 0 }
       : { x: raw.x - gravity.x, y: raw.y - gravity.y, z: raw.z - gravity.z };
   }
   if (!linear || Math.hypot(linear.x, linear.y, linear.z) > 35) return { state: resetPeaks(state), shake: false, usable: true };
-  const axis = sample.horizontalAxis || "x";
   const cross = axis === "x" ? linear.y : linear.x;
   const horizontal = linear[axis];
   const dominant = Math.abs(horizontal) >= Math.max(Math.abs(cross), Math.abs(linear.z)) * .8;

@@ -51,3 +51,7 @@
 @media(max-height:620px){.stg-rank-height .stg-rank-tree{width:21px;height:29px}}
 @media(prefers-reduced-motion:reduce){.stg-stage-art{animation:none}.stg-tree .stg-stage-image{transition:none;transform:none;filter:none}}
 .motion-paused .stg-stage-art{animation:none}.motion-paused .stg-tree .stg-stage-image{transition:none;transform:none;filter:none}
+
+.stg-mobile-controls{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:8px}
+.stg-mobile-controls button{min-height:44px;padding:6px 12px;border-radius:12px;background:#fff0d1;color:#622c23;font-size:12px;font-weight:600}
+.stg-mobile-controls button[aria-pressed=true]{background:#e8c582}

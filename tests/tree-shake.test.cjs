@@ -69,6 +69,17 @@ test("moderate horizontal shakes score on common 20 Hz sensors", () => {
   const wave = []; for (let at=0; at<=5000; at+=50) wave.push({at,...net(5*Math.sin(at/1000*Math.PI*4))});
   assert.ok(play(wave).hits.length >= 4, "moderate shakes should be detected");
 });
+test('partial accelerometer readings still score when the horizontal axis is available', () => {
+  const wave = samples(5000, t => net(8*Math.sin(t/1000*Math.PI*4), null, null));
+  assert.ok(play(wave).hits.length >= 4);
+  assert.equal(detectTreeShake(createTreeShakeState(), {at:0,...net(null, 6, 0)}).usable, false);
+});
+
+test('nonzero readings on other linear axes do not mask the raw horizontal axis', () => {
+  const wave = samples(5000, t => ({ ...gravity(t < 320 ? 0 : 10*Math.sin((t-320)/1000*Math.PI*4.8)), ...net(0,.05,null) }));
+  assert.ok(play(wave).hits.length >= 5);
+});
+
 test("gravity data is used when linear acceleration reports only zeroes", () => {
   const wave=samples(5000,t=>({ ...gravity(t<320?0:10*Math.sin((t-320)/1000*Math.PI*4.8)), ...net(0) }));
   assert.ok(play(wave).hits.length >= 5, "zero linear readings must not mask usable gravity data");

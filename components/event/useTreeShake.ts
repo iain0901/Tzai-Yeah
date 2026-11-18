@@ -40,7 +40,7 @@ export function useTreeShake({ onShake, enabled }: { onShake: () => void; enable
     if (document.visibilityState !== "visible") { setStatus("paused"); setMessage("回到遊戲後，就能繼續開啟搖動。"); return; }
     const motion = window.DeviceMotionEvent as MotionPermissionClass | undefined;
     if (!window.isSecureContext) { setStatus("unavailable"); setMessage("搖動需要 HTTPS 安全連線，請用瀏覽器開啟安全網址；也可以點小樹收集星光。"); return; }
-    if (!motion) { setStatus("unavailable"); setMessage("此瀏覽器不支援動作感測，請用 Safari 或 Chrome 開啟，或直接點小樹收集星光。"); return; }
+
     const policy = (document as Document & { permissionsPolicy?: { allowsFeature: (name: string) => boolean }; featurePolicy?: { allowsFeature: (name: string) => boolean } }).permissionsPolicy
       ?? (document as Document & { featurePolicy?: { allowsFeature: (name: string) => boolean } }).featurePolicy;
     if (policy && !policy.allowsFeature("accelerometer")) { setStatus("unavailable"); setMessage("網頁的動作感測權限受到限制，請用瀏覽器直接開啟；也可以點小樹收集星光。"); return; }
@@ -48,7 +48,7 @@ export function useTreeShake({ onShake, enabled }: { onShake: () => void; enable
     const run = generation.current;
     pending.current = true;
     try {
-      if (typeof motion.requestPermission === "function") {
+      if (typeof motion?.requestPermission === "function") {
         // Do not defer this call: iOS requires this same user-activation turn.
         const permission = motion.requestPermission();
         setMessage("允許動作感測，就能把搖動變成星光。");
@@ -82,8 +82,8 @@ export function useTreeShake({ onShake, enabled }: { onShake: () => void; enable
       setStatus("listening"); setMessage("正在聽你的節奏，試著輕輕左右搖動。");
       availabilityTimer.current = setTimeout(() => {
         if (!mounted.current || generation.current !== run || receivedData) return;
-        detach(); setStatus("unavailable"); setMessage("沒有收到手機動作，請檢查瀏覽器感測權限，或改用 Safari／Chrome 開啟；也可以點小樹收集星光。");
-      }, 3000);
+        detach(); setStatus("unavailable"); setMessage("沒有收到手機動作，請檢查瀏覽器感測權限，或改用 Safari／Chrome 開啟；也可以直接點按收集星光。");
+      }, 5000);
     } catch {
       if (!mounted.current || generation.current !== run) return;
       detach(); setStatus("denied"); setMessage("無法開啟手機動作，請檢查瀏覽器感測權限後再試，或直接點小樹收集星光。");

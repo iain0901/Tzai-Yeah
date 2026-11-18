@@ -95,3 +95,11 @@ body:has(.love-app){background:#082a23 radial-gradient(ellipse at 50% 20%,#21544
   display: grid;
   min-height: 52px;
 }
+
+/* Keep intrinsic artwork and text widths from expanding the mobile grid track. */
+.love-app,.app-screen-home{grid-template-columns:minmax(0,1fr)}
+.app-viewport,.scene-transition,.scene-transition-content,.app-screen,.app-screen-home>*{min-width:0;max-width:100%}
+.app-home-heading h1{height:auto;max-height:none;overflow:visible}
+.app-home-actions .app-button{max-width:100%;min-width:0}
+@media(max-width:380px){.app-home-heading h1{font-size:clamp(38px,14vw,54px)}}
+@media(max-height:550px){.app-screen-home:not(.app-live-home):has(.app-home-heading){grid-template-rows:auto minmax(155px,1fr) auto;overflow-y:auto;overscroll-behavior:contain}}
